@@ -5,15 +5,15 @@ services:
     container_name: ingestor-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-ingestor}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ingestor}
-      POSTGRES_DB: ${POSTGRES_DB:-ingestor}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER required (set in .env)}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required (set in .env)}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB required (set in .env)}
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ingestor} -d ${POSTGRES_DB:-ingestor}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -32,7 +32,7 @@ services:
         required: false
     environment:
       # When running inside the compose network, talk to postgres by service name.
-      DB_DSN: ${DB_DSN_OVERRIDE:-postgresql://${POSTGRES_USER:-ingestor}:${POSTGRES_PASSWORD:-ingestor}@postgres:5432/${POSTGRES_DB:-ingestor}}
+      DB_DSN: ${DB_DSN_OVERRIDE:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
     # Run ingestor on-demand via `docker compose run --rm ingestor ...`.
     # The default profile keeps it from auto-starting with `docker compose up`.
     profiles: ["cli"]

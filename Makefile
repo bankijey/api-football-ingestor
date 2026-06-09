@@ -55,7 +55,7 @@ logs:
 	docker compose logs -f postgres
 
 psql:
-	docker exec -it ingestor-postgres psql -U $${POSTGRES_USER:-ingestor} -d $${POSTGRES_DB:-ingestor}
+	docker exec -it ingestor-postgres psql -U $${POSTGRES_USER:?POSTGRES_USER not set} -d $${POSTGRES_DB:?POSTGRES_DB not set}
 
 clean:
 	docker compose down -v

@@ -76,7 +76,7 @@ Tear down with `make down` (keeps data) or `make clean` (drops the volume).
 ```bash
 # Tests need Postgres running:
 make up
-TEST_DB_DSN=postgresql://ingestor:ingestor@localhost:${POSTGRES_HOST_PORT:-5432}/ingestor make test
+TEST_DB_DSN=postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:${POSTGRES_HOST_PORT:-5432}/$POSTGRES_DB make test
 
 make lint                     # ruff + mypy strict
 ```
