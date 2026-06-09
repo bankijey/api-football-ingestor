@@ -1,0 +1,77 @@
+# Bronze ingestor stack.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ingestor-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ingestor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ingestor}
+      POSTGRES_DB: ${POSTGRES_DB:-ingestor}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ingestor} -d ${POSTGRES_DB:-ingestor}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  ingestor:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: api-football-ingestor:latest
+    container_name: ingestor
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # When running inside the compose network, talk to postgres by service name.
+      DB_DSN: ${DB_DSN_OVERRIDE:-postgresql://${POSTGRES_USER:-ingestor}:${POSTGRES_PASSWORD:-ingestor}@postgres:5432/${POSTGRES_DB:-ingestor}}
+    # Run ingestor on-demand via `docker compose run --rm ingestor ...`.
+    # The default profile keeps it from auto-starting with `docker compose up`.
+    profiles: ["cli"]
+
+  scheduler:
+    # Lightweight Alpine cron that triggers the ingestor daily at 2am UTC.
+    # Runs as a long-lived service: `docker compose up -d scheduler`
+    # Change the cron expression to adjust the schedule.
+    # docker:cli ships with docker + compose plugin + tzdata already installed,
+    # so the container does not need internet at startup (Alpine repos sometimes
+    # blocked by Docker Desktop DNS).
+    image: docker:27-cli
+    container_name: ingestor-scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace:ro
+    environment:
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-api-football-ingestor}
+      TZ: ${TZ:-UTC}
+    env_file:
+      - path: .env
+        required: false
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        apk add --no-cache tzdata > /dev/null 2>&1
+        cp /usr/share/zoneinfo/$$TZ /etc/localtime 2>/dev/null || true
+        echo "$$TZ" > /etc/timezone
+        mkdir -p /var/log && touch /var/log/ingest.log
+        # Write the crontab (0 2 * * * = 02:00 daily, in $TZ).
+        # No --season flag: the runner rides whatever the API marks current per league.
+        echo '0 2 * * * docker compose -f /workspace/docker-compose.yml run --rm ingestor ingest >> /var/log/ingest.log 2>&1' \
+          | crontab -
+        crond -f -l 6
+    profiles: ["scheduler"]
+
+volumes:
+  pgdata:
