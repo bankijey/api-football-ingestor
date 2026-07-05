@@ -65,6 +65,14 @@ class Settings(BaseSettings):
         default="postgresql://ingestor:ingestor@postgres:5432/ingestor",
         description="psycopg2 connection string.",
     )
+    # Sources (matcher) DB the `apifootball_events` projection is written INTO
+    # (D5). Mirrors db_dsn's type + env-only loading, but carries NO DSN literal
+    # default (AC2): a real DSN must come from MATCHER_DB_DSN. Empty means the
+    # projection is unconfigured and the run's projection step is skipped.
+    matcher_db_dsn: str = Field(
+        default="",
+        description="Sources-DB psycopg2 connection string (env MATCHER_DB_DSN).",
+    )
 
     # --- Logging ---
     log_level: str = Field(default="INFO")

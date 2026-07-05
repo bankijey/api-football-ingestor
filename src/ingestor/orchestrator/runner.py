@@ -108,6 +108,12 @@ def run_ingestion(
             checkpoints.finish_run(run_id, status=status, counters=counters)
             _log.info("run.done", status=status, counters=counters)
 
+            # Final step of a SUCCESSFUL run: rebuild the apifootball_events
+            # projection in the sources DB (D4). Gated on 'succeeded' so
+            # partial/failed runs leave the prior snapshot untouched.
+            if _should_project(status, settings):
+                _project_events(settings, pool)
+
             return RunResult(
                 run_id=run_id, status=status,
                 phase_a=phase_a, phase_b=phase_b,
@@ -189,3 +195,17 @@ def _terminal_status(a: PhaseAResult, b: PhaseBResult) -> str:
     if a.counters.failed == 0 and b.counters.failed == 0:
         return "succeeded"
     return "partial"
+
+
+def _should_project(status: str, settings: Settings) -> bool:
+    """Gate for the projection hook: only on a succeeded run, and only when a
+    sources DB is configured (empty MATCHER_DB_DSN disables it)."""
+    return status == "succeeded" and bool(settings.matcher_db_dsn)
+
+
+def _project_events(settings: Settings, bronze_pool: ConnectionPool) -> None:
+    from ..projection import build_projection
+
+    with ConnectionPool(settings.matcher_db_dsn, minconn=1, maxconn=2) as matcher_pool:
+        n = build_projection(bronze_pool=bronze_pool, matcher_pool=matcher_pool)
+    _log.info("run.projection_written", rows=n)
