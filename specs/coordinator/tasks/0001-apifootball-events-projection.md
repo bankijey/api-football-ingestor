@@ -18,14 +18,19 @@ ingestor maintains, not `REFRESH MATERIALIZED VIEW`).
 
 ## In scope
 
-### Config — modified
-- Add `MATCHER_DB_URL` (the sources DB DSN) to the settings model and
-  `.env.example`. Loaded from env only (never hardcoded). This is the DB the
-  projection is written INTO; bronze ingestion continues to use the existing
-  bronze DB URL.
+### Config — modified (`src/ingestor/config.py`)
+- Add `matcher_db_dsn: str` (env `MATCHER_DB_DSN`) to the `Settings` model,
+  mirroring the existing `db_dsn`/`DB_DSN` field (config.py:64) — same type, same
+  env-only loading (never hardcoded). This is the **sources DB** the projection
+  is written INTO; bronze ingestion keeps using `db_dsn`. Also document it in
+  `.env.example`. (Naming: DSN not URL, to stay consistent with `db_dsn`.)
 
-### Projection builder — created (e.g. `src/.../projection.py`)
-A single-purpose module that, given the two DB connections:
+### Projection builder — created (`src/ingestor/projection.py`)
+A single-purpose module that takes two `ConnectionPool`s (from
+`src/ingestor/db/connection.py`) — the existing bronze pool for reads and a
+second pool built from `settings.matcher_db_dsn` for the sources-DB write. Do
+NOT open raw psycopg2 connections (the pool is the only sanctioned DB entrypoint
+— see the `connection.py` module docstring). Then:
 1. Reads from the **local bronze DB**: the latest `bronze_fixtures` row per
    `(league_id, season)` (`DISTINCT ON (league_id, season) … ORDER BY
    league_id, season, ingested_at DESC`), and unwraps each payload's
@@ -34,27 +39,40 @@ A single-purpose module that, given the two DB connections:
    `fixture.timestamp` is in the future. Maps to a projection row:
    | column | source |
    |---|---|
-   | `fixture_id` | `fixture.id` |
+   | `fixture_id` | `fixture.id` (ingestor natural key; not in `EVENT_COLUMNS`, harmless) |
    | `e_id` | `'apifootball;' || fixture.id` (**semicolon**, D6) |
+   | `bookmaker_id` | `'apifootball'` (D6) |
    | `sport_key` | `'football'` |
    | `start` | `to_timestamp(fixture.timestamp)` (`TIMESTAMPTZ`) |
    | `tid` | `league.id` |
    | `tournament` | `league.name` |
    | `home_team` / `away_team` | `teams.home.name` / `teams.away.name` |
    | `home_id` / `away_id` | `teams.home.id` / `teams.away.id` |
+   | `url` | `NULL` (D6) |
+
+   The full column set is D6's `EVENT_COLUMNS` (plus the `fixture_id` natural
+   key). Do NOT drop `bookmaker_id` or `url` — the matcher's `ApiFootballSource`
+   selects them by name (matcher task 0001).
 3. Writes to the **sources DB** `apifootball_events` table via an **atomic
    replace in one transaction**: build into a staging table then swap, or
    `BEGIN; TRUNCATE apifootball_events; INSERT …; COMMIT;`. The table is created
-   if absent (idempotent DDL). Readers see the whole old snapshot or the whole
-   new one — never a partial (D4).
+   if absent (idempotent DDL, run at build start on the same connection). Use a
+   single `with matcher_pool.connection() as conn:` block — its commit-on-clean-
+   exit / rollback-on-exception (connection.py:38-49) IS the all-or-nothing
+   guarantee AC5 checks. Readers see the whole old snapshot or the whole new one
+   — never a partial (D4).
 - All leagues, football only (D3). No downsampling, no filtering by HF-selected
   leagues.
 
-### Orchestration hook — modified
-- After a run reaches terminal status, call the projection build **iff**
-  `ingestion_runs.status == 'succeeded'` (D4). A `partial`/`failed` run must NOT
-  refresh the projection — the prior snapshot stays. This fires on **any**
-  successful run, not only the scheduled 2am one.
+### Orchestration hook — modified (`src/ingestor/orchestrator/runner.py`)
+- In `run_ingestion`, on the **success path only** — after
+  `checkpoints.finish_run(run_id, status=status, …)` (runner.py:108) and gated on
+  `status == 'succeeded'` (computed by `_terminal_status`, runner.py:101/188) —
+  call the projection builder, passing the existing bronze `pool` and a pool
+  built from `settings.matcher_db_dsn`. The `except` branch (runner.py:116-120)
+  sets status `failed` and re-raises, so `partial`/`failed` never reach the hook
+  and the prior snapshot stays untouched (D4). Fires on **any** successful run,
+  not only the scheduled 2am one.
 
 ## Out of scope
 - **The matcher's `ApiFootballSource`** (that's `arbibet-matcher` task 0001).
@@ -68,13 +86,14 @@ A single-purpose module that, given the two DB connections:
 
 ## Files
 Created:
-- `src/<pkg>/projection.py` (builder + atomic-swap writer + idempotent DDL)
+- `src/ingestor/projection.py` (builder + atomic-swap writer + idempotent DDL)
 - `tests/test_projection.py`
 
 Modified:
-- `src/<pkg>/config.py` (settings) — add `MATCHER_DB_URL`
-- `.env.example` — document `MATCHER_DB_URL`
-- the run orchestrator — invoke the builder gated on `status == 'succeeded'`
+- `src/ingestor/config.py` — add `matcher_db_dsn` (env `MATCHER_DB_DSN`)
+- `.env.example` — document `MATCHER_DB_DSN`
+- `src/ingestor/orchestrator/runner.py` — invoke the builder in `run_ingestion`,
+  gated on `status == 'succeeded'`
 - `docs/ROADMAP.md` — coordinator flips `0001 [~]→[x]` + Progress-log line ON
   CLOSE (not the implementor)
 - `LOG.md` — implementor appends one line on commit
@@ -84,13 +103,14 @@ If anything outside this list needs changing, STOP and surface a note at
 
 ## Acceptance criteria (Definition of Done)
 1. `make lint` and `make test` exit 0; new tests collected.
-2. `MATCHER_DB_URL` is in the settings model and `.env.example`; absent from
-   source as a literal.
+2. `matcher_db_dsn` (env `MATCHER_DB_DSN`) is in the `Settings` model and
+   `.env.example`; no DSN literal in source.
 3. Given a seeded `bronze_fixtures` payload containing a mix of fixtures
    (one `NS`+future, one `NS`+past, one `FT`), running the projection writes to
    the sources DB **exactly one** `apifootball_events` row — the `NS`+future one
-   — with `e_id == "apifootball;<id>"`, `sport_key == "football"`, and the D6
-   column mapping.
+   — carrying the full D6 column set: `e_id == "apifootball;<id>"`,
+   `bookmaker_id == "apifootball"`, `sport_key == "football"`, `url IS NULL`,
+   plus the `start`/`tid`/`tournament`/team-name/team-id mapping.
 4. `e_id` uses `;` not `:`.
 5. **Atomicity:** simulate a failure mid-write (after staging, before commit) →
    the prior `apifootball_events` snapshot is intact (no partial state, no empty
@@ -107,8 +127,8 @@ If anything outside this list needs changing, STOP and surface a note at
 
 ## Verifier checklist (mirror of DoD + housekeeping)
 - [ ] AC1 — lint/test green
-- [ ] AC2 — `MATCHER_DB_URL` config + `.env.example`, not hardcoded
-- [ ] AC3 — projection row set correct for a mixed seed
+- [ ] AC2 — `matcher_db_dsn` (`MATCHER_DB_DSN`) config + `.env.example`, not hardcoded
+- [ ] AC3 — projection row set correct for a mixed seed (full D6 columns)
 - [ ] AC4 — semicolon `e_id`
 - [ ] AC5 — atomic swap leaves prior snapshot intact on mid-write failure
 - [ ] AC6 — refresh gated on `status == 'succeeded'`

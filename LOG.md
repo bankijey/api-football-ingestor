@@ -13,3 +13,5 @@ Fields:
 - `result/ref` — commit hash, report path, or a short status
 
 ---
+
+2026-07-05 13:26 Berlin | coordinator | 0001-apifootball-events-projection | drafted task | specs/coordinator/tasks/0001-apifootball-events-projection.md
