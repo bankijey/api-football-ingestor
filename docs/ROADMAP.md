@@ -111,6 +111,12 @@ Silver and Gold are explicitly OUT OF SCOPE until this phase is complete.
 - [x] Backfill is just a normal run with different args (no special script)
 - [x] Confirmed: bronze is fully replayable (rebuild path documented)
       — see `docs/REBUILD.md`.
+- [~] **0002** — Multi-season backfill enhancement: `--seasons` CLI flag +
+      `select_leagues(seasons=…)` + window guard, landing the pre-existing
+      uncommitted feature (with a bundled `ThreadedConnectionPool` fix) and
+      restoring a green lint/test baseline (`cli.py` UP017 fix, pytest
+      `pythonpath`). Precursor to 0001 — unblocks its clean handoff. Spec:
+      `specs/coordinator/tasks/0002-seasons-override-backfill.md`.
 
 ### 1.9 Docker & DX
 - [x] Dockerfile (ingestor)
@@ -139,7 +145,9 @@ reads as an event source (DECISIONS D2–D6). Step 2 (the matcher-side source) i
 `arbibet-matcher` task 0001.
 
 ### 1.10 `apifootball_events` projection (D2–D6)
-- [~] **0001** — Physical snapshot table `apifootball_events` in the matcher's
+- [~] **0001** — _(PAUSED — blocked on 0002; implementor escalated a dirty tree,
+      see `specs/implementor/notes/0001-apifootball-events-projection.md`.)_
+      Physical snapshot table `apifootball_events` in the matcher's
       (sources) DB, computed from `bronze_fixtures` (latest per league+season,
       `status=NS`, `start > NOW()`, all leagues, football), conforming to the
       matcher's `EVENT_COLUMNS` with `e_id="apifootball;<fixture_id>"`. Built as
