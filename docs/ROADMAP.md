@@ -129,6 +129,29 @@ Silver and Gold are explicitly OUT OF SCOPE until this phase is complete.
 
 ---
 
+## Phase 1.5 — API-Football projection (CURRENT SCOPE)
+
+Governance scaffolding (`DECISIONS.md`, `LOG.md`, `specs/`, `PROMPTS.md`,
+`CLAUDE.md` charter amendment + three-agent workflow) was set up as a
+**bootstrap** outside the loop (2026-07-05). The first loop task builds the one
+bronze-only-charter exception: the `apifootball_events` snapshot the matcher
+reads as an event source (DECISIONS D2–D6). Step 2 (the matcher-side source) is
+`arbibet-matcher` task 0001.
+
+### 1.10 `apifootball_events` projection (D2–D6)
+- [~] **0001** — Physical snapshot table `apifootball_events` in the matcher's
+      (sources) DB, computed from `bronze_fixtures` (latest per league+season,
+      `status=NS`, `start > NOW()`, all leagues, football), conforming to the
+      matcher's `EVENT_COLUMNS` with `e_id="apifootball;<fixture_id>"`. Built as
+      the final step of a run, gated on `ingestion_runs.status='succeeded'`,
+      refreshed on **any** successful run, replaced **atomically in one
+      transaction** (cross-DB precludes a matview — D4). Written into the
+      matcher's DB (option B — the ingestor gains sources-DB write creds).
+      Coordinate the table contract with matcher task 0001. Spec:
+      `specs/coordinator/tasks/0001-apifootball-events-projection.md`.
+
+---
+
 ## Phase 2 — Silver Layer (FUTURE — do not start yet)
 - [ ] Flatten/parse bronze JSONB into typed relational tables
 - [ ] Extract embedded data from rich fixture response (lineups, events,
