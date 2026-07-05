@@ -3,7 +3,36 @@
 **Roadmap item:** Phase 1.5 §1.10
 **Depends on:** governance bootstrap (done); `bronze_fixtures` (exists).
 Coordinates with `arbibet-matcher` task 0001 (the column contract).
-**Status:** open
+**Status:** active (re-routed to implementor 2026-07-05 after 0002 unblocked it)
+
+## Resolution / re-route (2026-07-05, coordinator)
+
+This task was paused when the implementor escalated a dirty tree
+(`specs/implementor/notes/0001-apifootball-events-projection.md`): a foreign,
+uncommitted `seasons_override` backfill feature was entangled in `runner.py` and
+its `cli.py` `UP017` lint error broke AC1. The coordinator took the escalation's
+**Option A**: opened precursor task **0002** to land the backfill feature and
+restore a green lint/test baseline. 0002 passed (verifier PASS, `c582c95`).
+
+The tree is now disentangled. `git diff --stat HEAD` carries **only 0001's
+in-scope work**: `config.py` (+`matcher_db_dsn`), `runner.py` (projection hook +
+`_should_project`/`_project_events`, no seasons hunks), and untracked
+`projection.py`, `tests/test_projection.py`, `.env.example`. The seasons hunks
+that were tangled into `runner.py` are now committed via 0002, so the `runner.py`
+working-tree diff is purely the projection hook.
+
+**Implementor, this cycle:** commit that residue as the 0001 deliverable. Do not
+re-implement from scratch — the escalation validated the code (5 tests pass
+against real Postgres). Confirm AC1 is now green on the 0002 baseline (fresh
+Python 3.12 env; the local `.venv` is 3.10 and cannot import `datetime.UTC` — a
+local-env issue, not a code failure, exactly as in the 0002 report), then commit.
+The §Files list below is unchanged and authoritative.
+
+One clarification the verifier should not flag as out-of-spec: the implemented
+gate `_should_project` returns `status == "succeeded" and bool(settings.matcher_db_dsn)`.
+The extra empty-DSN short-circuit (an empty `MATCHER_DB_DSN` disables the hook) is
+an **accepted** defensive guard — it satisfies AC6's `succeeded`-gate and adds no
+`DECISIONS.md` violation. Keep AC6's unit test DB-free (assert the guard directly).
 
 ## Goal
 

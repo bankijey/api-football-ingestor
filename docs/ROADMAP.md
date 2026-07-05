@@ -111,7 +111,7 @@ Silver and Gold are explicitly OUT OF SCOPE until this phase is complete.
 - [x] Backfill is just a normal run with different args (no special script)
 - [x] Confirmed: bronze is fully replayable (rebuild path documented)
       — see `docs/REBUILD.md`.
-- [~] **0002** — Multi-season backfill enhancement: `--seasons` CLI flag +
+- [x] **0002** — Multi-season backfill enhancement: `--seasons` CLI flag +
       `select_leagues(seasons=…)` + window guard, landing the pre-existing
       uncommitted feature (with a bundled `ThreadedConnectionPool` fix) and
       restoring a green lint/test baseline (`cli.py` UP017 fix, pytest
@@ -145,8 +145,10 @@ reads as an event source (DECISIONS D2–D6). Step 2 (the matcher-side source) i
 `arbibet-matcher` task 0001.
 
 ### 1.10 `apifootball_events` projection (D2–D6)
-- [~] **0001** — _(PAUSED — blocked on 0002; implementor escalated a dirty tree,
-      see `specs/implementor/notes/0001-apifootball-events-projection.md`.)_
+- [~] **0001** — _(UNBLOCKED 2026-07-05 — 0002 landed (Option A); tree now carries
+      only 0001's in-scope residue. Re-routed to the implementor for a clean
+      commit. See `specs/implementor/notes/0001-apifootball-events-projection.md`
+      and the spec's Resolution note.)_
       Physical snapshot table `apifootball_events` in the matcher's
       (sources) DB, computed from `bronze_fixtures` (latest per league+season,
       `status=NS`, `start > NOW()`, all leagues, football), conforming to the
@@ -189,3 +191,10 @@ reads as an event source (DECISIONS D2–D6). Step 2 (the matcher-side source) i
   `logs`, `psql`, `clean`), README quickstart, `docs/REBUILD.md` documenting
   the replay path. All Phase 1 ROADMAP boxes ticked; only the exit-criteria
   smoke (real-API run) remains.
+- _(2026-07-05)_ — **0002** done (verifier PASS, `c582c95`): `--seasons` CLI
+  flag + `select_leagues(seasons=…)` + window guard, landing the pending
+  multi-season backfill feature with a `ThreadedConnectionPool` fix and a
+  restored green lint/test baseline (`cli.py` UP017, pytest `pythonpath`). This
+  was Option A from 0001's escalation — it disentangles the tree so **0001**
+  (`apifootball_events` projection) can now commit cleanly. 0001 re-routed to
+  the implementor.
