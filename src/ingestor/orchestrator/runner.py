@@ -43,7 +43,9 @@ class RunResult:
 @dataclass
 class RunArgs:
     """Subset of inputs we want recorded on `ingestion_runs.args`."""
-    season_override: int | None = None
+    # When set, replaces the default `current=true` season filter in
+    # select_leagues. Use [2019,2020,2021,2022] to backfill historical seasons.
+    seasons_override: list[int] | None = None
     league_subset_override: list[int] | None = None
     lookback_days_override: int | None = None
     resume_run_id: UUID | None = None
@@ -138,8 +140,16 @@ def _execute_phases(
     with pool.connection() as conn:
         leagues_outcome = fetch_leagues(client, conn, run_id=run_id)
     subset = args.league_subset_override or settings.league_subset or None
-    works = select_leagues(leagues_outcome.payload, subset=subset)
-    _log.info("run.leagues_selected", count=len(works))
+    works = select_leagues(
+        leagues_outcome.payload,
+        subset=subset,
+        seasons=args.seasons_override,
+    )
+    _log.info(
+        "run.leagues_selected",
+        count=len(works),
+        seasons_override=args.seasons_override,
+    )
 
     # Phase A.
     phase_a = run_phase_a(

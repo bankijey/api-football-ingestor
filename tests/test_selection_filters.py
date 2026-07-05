@@ -29,6 +29,34 @@ def test_select_leagues_returns_current_seasons_only() -> None:
     assert works[0].coverage == {"fixtures": {"lineups": True}}
 
 
+def test_select_leagues_seasons_override_returns_those_seasons() -> None:
+    """seasons=[...] replaces the current=true filter."""
+    payload = {"response": [_league(39, current_year=2025, coverage_flags={"lineups": True})]}
+    # _league() helper produces seasons [current_year-1, current_year]
+    works = select_leagues(payload, seasons=[2024, 2025])
+    years = sorted(w.season for w in works)
+    assert years == [2024, 2025]
+
+
+def test_select_leagues_seasons_override_can_skip_current() -> None:
+    """If seasons doesn't include current, current is NOT returned."""
+    payload = {"response": [_league(39, current_year=2025, coverage_flags={"lineups": True})]}
+    works = select_leagues(payload, seasons=[2024])
+    assert len(works) == 1
+    assert works[0].season == 2024
+
+
+def test_select_leagues_seasons_and_subset_compose() -> None:
+    payload = {"response": [
+        _league(39, current_year=2025, coverage_flags={"lineups": True}),
+        _league(140, current_year=2025, coverage_flags={"lineups": True}),
+    ]}
+    works = select_leagues(payload, subset=[39], seasons=[2024])
+    assert len(works) == 1
+    assert works[0].league_id == 39
+    assert works[0].season == 2024
+
+
 def test_select_leagues_subset_filter() -> None:
     payload = {
         "response": [
