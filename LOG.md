@@ -30,3 +30,4 @@ Fields:
 2026-07-06 18:25 Berlin | implementor | 0005-full-catalogue-run | executed full run | docs/FULLRUN_0005_EVIDENCE.md — run 1f814136 succeeded, 1231 leagues/381 fixtures, bronze ~9m, projection 42399 events ~164s NO OOM (0004 payoff, py3.12 image); ~2021 calls = 2.7% of 75000 quota; 0 dead_letter this run (29 transient 200-with-errors retried clean); S6 ruff/mypy/pytest 87 passed/1 xfail/0 skips (py3.12); one run/day feasible; partial-tolerance policy flagged as follow-up; no prod code changed
 2026-07-06 12:20 Berlin | verifier | 0003-live-smoke-exit-criteria | verified | PASS
 2026-07-06 15:42 Berlin | verifier | 0004-projection-hardening | verified | PASS
+2026-07-06 18:55 Berlin | verifier | 0005-full-catalogue-run | verified | PASS
