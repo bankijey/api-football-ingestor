@@ -446,3 +446,51 @@ re-attempt on the same key ~45 min later confirms the quota was never the
 blocker. The likely cause was a transient per-minute burst mislabelled by the API
 (possibly other consumers sharing the key). Worth logging the `x-ratelimit-*`
 headers (roadmap **0009**) to disambiguate future occurrences.
+
+---
+
+## Coordinator addendum (2026-07-06 21:23 UTC) — ROOT CAUSE: subscription lapse
+
+**New operational fact (from the account owner):** the API-Football subscription
+had **lapsed** and was **renewed ~1 h before 21:23 UTC** (≈ 20:2x UTC). This
+**supersedes** the two hypotheses recorded above — self-induced per-minute 429s
+*and* "possibly other consumers sharing the key". Both are ruled out.
+
+**Evidence-based correlation** (outcomes of every fire on the one key, 2026-07-06 UTC):
+
+| Fire (UTC) | run_id | outcome | limit-type error? |
+|-----------|--------|---------|-------------------|
+| 00:00 | (stale-image real cron) | succeeded | no — BEFORE lapse |
+| 16:05→16:14 | `1f814136` (0005) | succeeded | no — BEFORE lapse |
+| 17:08→17:18 | `c7f82ae2` | **partial** | 3× HTTP 429 (`fixtures_by_league`) |
+| 17:21→17:31 | `4befe5d5` | **partial** | 9× HTTP 429 (`fixtures_by_league`) |
+| 19:27 (39 s) | `851d7576` | **failed** | in-body "request limit for the day" (`/leagues`) |
+| 20:12→20:20 | `ec38234d` | **succeeded** | none — AFTER renewal |
+
+Two brackets fall straight out of the ledger, no assumption:
+- **Lapse began** after 0005 succeeded (16:14 UTC) and before the first failure
+  (17:08 UTC).
+- **Renewal landed** after the last failure (19:27:47 UTC) and before the first
+  success (20:12:13 UTC) — a **~44 min window**, consistent with the owner's
+  "~1 h ago" (≈ 20:2x UTC).
+
+**Why this is the lapse — not throttling or shared-key contention:** the
+`/status` probe at ~20:07 UTC showed the plan **active**, `Ultra`, only
+**9,144 / 75,000** daily requests used (~88 % free) — yet every fire from
+17:08–19:27 was rejected with a limit-type error. A limit rejection with ~88 %
+real headroom is the signature of an **inactive subscription**, not genuine
+rate-limiting. The very first fire after the renewal bracket (`ec38234d`, same
+key + command) succeeded with **0** failures. The only variable that changed was
+subscription state.
+
+**Routing consequences (coordinator):**
+- The "flaky day" risk that motivated a partial-tolerance policy was **this
+  lapse** — a billing/calendar event, not a genuine per-run failure rate. So
+  **0010 (partial-tolerance / D4 change) is DEFERRED**; **D4 stays locked**. The
+  `partial`/`failed` runs correctly preserved the prior 42,399-row snapshot
+  throughout — the matcher never saw a bad table.
+- **0009 (x-ratelimit-* header logging)** is **backlog** observability for
+  *future* diagnosis — not needed to explain this incident.
+- The plan **expiry is 2026-08-06** (from `/status`). Tracking it as a calendar
+  event is folded into **0008**'s ops note, so the next lapse is anticipated, not
+  three mystery fires at 02:00.

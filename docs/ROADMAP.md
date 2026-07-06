@@ -198,36 +198,40 @@ populated in the sources DB) — which gates the matcher's live smoke
       2,021 calls ≈ 2.7 % of daily quota, ~12 min. Verifier PASS `a659f74`.
       Evidence: `docs/FULLRUN_0005_EVIDENCE.md`. Spec:
       `specs/coordinator/tasks/0005-full-catalogue-run.md`.
-- [~] **0007** — Rebuild + redeploy the ingestor image and **prove the
-      autonomous scheduled run refreshes `apifootball_events`** (0003 finding
-      F2). The deployed 2am cron runs `docker compose run --rm ingestor ingest`
-      with **no build step**, so it uses a stale pre-0001 `:latest` — production
-      has never autonomously refreshed the projection. DoD = "deployed AND
-      verified": a crond-fired run of the rebuilt image reaches `succeeded` and
-      refreshes the sources-DB table, proven from the scheduler's own log — not a
-      manual `make ingest`. Zero repo change. Spec:
+- [x] **0007** — Rebuild + redeploy the ingestor image and **prove the
+      autonomous scheduled run refreshes `apifootball_events`** (0003 finding F2).
+      Verifier PASS `3c26123`. A crond-fired isolated run (`ec38234d`, 20:12 UTC)
+      of the rebuilt image reached `succeeded` and refreshed the projection to
+      42,383 rows (D6 contract 42383/42383). En route it hit transient
+      429/`failed` fires later traced to a **subscription lapse** (renewed
+      2026-07-06, expiry 2026-08-06 — see `docs/DEPLOY_0007_EVIDENCE.md`
+      coordinator addendum), NOT rate-limiting or shared-key contention; D4 held
+      correctly throughout (bad runs left the prior snapshot intact). Spec:
       `specs/coordinator/tasks/0007-scheduler-redeploy.md`.
-- [ ] **0008** — Daily scheduling: operationalize the daily run using 0005's
-      sizing (~12 min, ~2.7 % quota, one run/day). Owns the **anti-drift redeploy
-      strategy** — the scheduled path currently never rebuilds `:latest`, so it
-      silently goes stale (root cause of F2/0007); decide rebuild-on-cron vs
-      registry-pull vs CI/CD. Depends on 0007.
+- [~] **0008** — Daily scheduling: **anti-drift redeploy** + ops runbook.
+      Decision = **rebuild-on-cron** (build before run) — the minimal correct fix
+      for this single-host, source-mounted compose setup (registry-pull / CI-CD
+      rejected as heavier). Makes the `0 2 * * *` cron self-currenting so it can
+      never silently run a stale `:latest` again (root cause of F2/0007). Adds
+      `docs/OPS.md` tracking the daily run + the **subscription expiry 2026-08-06**
+      so the next lapse is an anticipated calendar event. Ingestion code
+      unchanged. Depends on 0007. Spec:
+      `specs/coordinator/tasks/0008-daily-scheduling.md`.
 - [ ] **0006** — Fix timing-flaky `test_heartbeat_ticks_at_interval` (0003
       finding V1): ≥3 ticks in a 180 ms window at a 50 ms interval overshoots
       under CPU saturation (Windows ~15 ms timer). Make it tolerant (fake clock /
       lower threshold / retry). Green-baseline hygiene. Sequence after 0008.
 - [ ] **0009** — Persist per-minute `x-ratelimit-*-remaining` headers (0005
-      finding 1): the client does not log them, so schedule-sizing used a derived
-      throughput average, not exact headroom. Small observability change. Backlog.
-- [ ] **0010** — Partial-tolerance / success-with-warnings policy (0007 escalation
-      + roadmap §1.6): a daily full-catalogue run over ~1,231 leagues can incur a
-      few transient 429s (0007 saw 3, then 9 under back-to-back load), and strict
-      `succeeded` gating (D4) then starves the projection on any flaky day. Decide
-      whether to refresh `apifootball_events` on `partial` under a failure-rate
-      threshold (e.g. <1 % leagues failed) — a D4 semantics change, likely a new
-      `DECISIONS.md` entry (coordinator/human call). **Becomes a precursor to 0007**
-      if 0007's isolated fire is still `partial`; otherwise a durable reliability
-      fix ahead of 0008.
+      finding 1): the client receives but discards them. **Backlog observability
+      for FUTURE diagnosis** — explicitly NOT needed to explain the 0007 incident,
+      which is now traced to a subscription lapse (not throttling). Small change.
+- [ ] **0010 — DEFERRED (D4 stays locked)** — Partial-tolerance /
+      success-with-warnings policy. The transient failures that motivated it
+      (0007's 429/`failed` fires) were a **subscription lapse**, not a genuine
+      per-run partial rate — so we do **not** amend a locked decision (D4) to
+      tolerate a billing event. The D4 all-or-nothing gate behaved correctly
+      throughout 0007 (bad runs preserved the prior snapshot). **Revisit only if a
+      healthy-subscription full run shows a real, recurring partial rate.**
 
 ---
 
@@ -323,3 +327,17 @@ populated in the sources DB) — which gates the matcher's live smoke
   rapid re-triggering — 0005 in isolation had 0 failures); §Files unchanged,
   D1/D2/D5 evidence salvaged. Fallback wired: if the isolated fire is still
   `partial`, the **partial-tolerance policy (0010)** becomes a precursor.
+- _(2026-07-06)_ — **0007** done (verifier PASS, `3c26123`): "deployed AND
+  verified" — a crond-fired isolated run (`ec38234d`, 20:12 UTC) of the rebuilt
+  projection-carrying image reached `succeeded` and refreshed `apifootball_events`
+  to 42,383 rows (D6 contract 42383/42383). **Root cause of the en-route
+  429/`failed` fires identified post-hoc: a subscription lapse** (operator fact;
+  renewed 2026-07-06, expiry 2026-08-06) — evidence-bracketed by run outcomes
+  (all fires 17:08–19:27 UTC rejected with limit-type errors despite 88 % quota
+  free; first fire after renewal, 20:12, succeeded with 0 failures). So the
+  "flaky day" was a billing event, not a real partial rate: **0010
+  (partial-tolerance / D4 change) DEFERRED, D4 stays locked**; **0009**
+  (x-ratelimit logging) demoted to future-observability backlog. Opened **0008**
+  (daily scheduling): decision **rebuild-on-cron** to kill the anti-drift flaw
+  (scheduled path never rebuilds `:latest`) + `docs/OPS.md` runbook tracking the
+  2026-08-06 expiry so the next lapse is anticipated.
