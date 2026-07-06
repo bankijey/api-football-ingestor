@@ -145,10 +145,9 @@ reads as an event source (DECISIONS D2–D6). Step 2 (the matcher-side source) i
 `arbibet-matcher` task 0001.
 
 ### 1.10 `apifootball_events` projection (D2–D6)
-- [~] **0001** — _(UNBLOCKED 2026-07-05 — 0002 landed (Option A); tree now carries
-      only 0001's in-scope residue. Re-routed to the implementor for a clean
-      commit. See `specs/implementor/notes/0001-apifootball-events-projection.md`
-      and the spec's Resolution note.)_
+- [x] **0001** — _(DONE 2026-07-05 — verifier PASS, `d7f125e`. Full suite ran
+      against the live `ingestor-postgres` container with zero skips; all 9 ACs
+      green.)_
       Physical snapshot table `apifootball_events` in the matcher's
       (sources) DB, computed from `bronze_fixtures` (latest per league+season,
       `status=NS`, `start > NOW()`, all leagues, football), conforming to the
@@ -159,6 +158,32 @@ reads as an event source (DECISIONS D2–D6). Step 2 (the matcher-side source) i
       matcher's DB (option B — the ingestor gains sources-DB write creds).
       Coordinate the table contract with matcher task 0001. Spec:
       `specs/coordinator/tasks/0001-apifootball-events-projection.md`.
+
+---
+
+## Phase 1.6 — Live smoke: exit criteria + projection E2E (CURRENT SCOPE)
+
+All hermetic work is green (1.1–1.10). What has never happened is a run against
+the **real API**. This phase proves the Phase 1 exit criteria live and, in the
+same run, proves the 0001 projection end-to-end (real run → `apifootball_events`
+populated in the sources DB) — which gates the matcher's live smoke
+(`arbibet-matcher` Phase B).
+
+### 1.11 Live smoke (evidence-based, quota-bounded)
+- [ ] **0003** — Quota-bounded live smoke: real API key, handpicked league
+      subset via `--leagues` (~5–10 leagues, current season). Proves, with
+      DB/ledger evidence (not pytest): full run `succeeded`; Phase B rich data +
+      halftime stats landed; immediate re-run inserts ≈0 bronze rows (hash
+      dedup); mid-run kill + `--resume` completes with no duplicates; forced
+      failures land in `dead_letter` and are retryable; projection E2E —
+      `apifootball_events` populated in the sources DB, `e_id` format correct,
+      NS+future only. Evidence recorded to `docs/SMOKE_0003_EVIDENCE.md`;
+      verifier corroborates by re-querying. Spec:
+      `specs/coordinator/tasks/0003-live-smoke-exit-criteria.md`.
+- [ ] **0004** — Full-catalogue daily run (all ~1,500 leagues) once 0003 is
+      green: the unbounded version of the same evidence, plus quota/duration
+      observations to size the daily schedule. (Deliberately sequenced second —
+      the bounded smoke proves every mechanism at ~1% of the quota first.)
 
 ---
 
@@ -198,3 +223,13 @@ reads as an event source (DECISIONS D2–D6). Step 2 (the matcher-side source) i
   was Option A from 0001's escalation — it disentangles the tree so **0001**
   (`apifootball_events` projection) can now commit cleanly. 0001 re-routed to
   the implementor.
+- _(2026-07-05)_ — **0001** done (verifier PASS, `d7f125e`): the
+  `apifootball_events` projection — the one bronze-only-charter exception (D2).
+  Latest `bronze_fixtures` per `(league_id, season)`, `NS`+future, all leagues,
+  projected to D6's `EVENT_COLUMNS` (`e_id="apifootball;<id>"`), written into the
+  sources DB via a single-transaction TRUNCATE+INSERT (D4/D5), gated on
+  `status=='succeeded'`. 85 tests pass (5 new projection tests ran against the
+  live container, zero skips); lint/type-check clean. **Phase 1.5 §1.10 complete
+  — the projection loop's terminal deliverable.** Remaining Phase-1 exit criteria
+  1–2 (full run across the live league set; Phase B live rich-data) need a
+  real-API smoke run.
