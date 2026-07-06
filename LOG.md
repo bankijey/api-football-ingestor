@@ -27,3 +27,4 @@ Fields:
 2026-07-06 12:04 Berlin | implementor | 0003-live-smoke-exit-criteria | executed live smoke | docs/SMOKE_0003_EVIDENCE.md — S1–S7 all pass (run 3ad05d60 succeeded, projection 39941 events, resume no-dup, invalid-key fail-safe); surfaced F1 (.env +psycopg2 DSN), F2 (deployed image predates 0001), F3 (projection perf ~6GiB/~12min cold); no production code changed
 2026-07-06 17:20 Berlin | implementor | 0004-projection-hardening | implemented | F3 server-side (named) cursor streams the bronze read in projection.py; F1 config validator normalizes `postgresql+psycopg2://`→`postgresql://` for matcher_db_dsn; +2 tests (streaming spy, DSN normalize); output byte-identical (existing test_projection.py unchanged); ruff/mypy/pytest 87 passed/1 xfail/0 skips
 2026-07-06 12:20 Berlin | verifier | 0003-live-smoke-exit-criteria | verified | PASS
+2026-07-06 15:42 Berlin | verifier | 0004-projection-hardening | verified | PASS
