@@ -219,6 +219,15 @@ populated in the sources DB) — which gates the matcher's live smoke
 - [ ] **0009** — Persist per-minute `x-ratelimit-*-remaining` headers (0005
       finding 1): the client does not log them, so schedule-sizing used a derived
       throughput average, not exact headroom. Small observability change. Backlog.
+- [ ] **0010** — Partial-tolerance / success-with-warnings policy (0007 escalation
+      + roadmap §1.6): a daily full-catalogue run over ~1,231 leagues can incur a
+      few transient 429s (0007 saw 3, then 9 under back-to-back load), and strict
+      `succeeded` gating (D4) then starves the projection on any flaky day. Decide
+      whether to refresh `apifootball_events` on `partial` under a failure-rate
+      threshold (e.g. <1 % leagues failed) — a D4 semantics change, likely a new
+      `DECISIONS.md` entry (coordinator/human call). **Becomes a precursor to 0007**
+      if 0007's isolated fire is still `partial`; otherwise a durable reliability
+      fix ahead of 0008.
 
 ---
 
@@ -303,3 +312,14 @@ populated in the sources DB) — which gates the matcher's live smoke
   pre-projection code in production. Sequenced after: **0008** daily scheduling
   (owns the anti-drift redeploy strategy), then **0006** flaky test; **0009**
   (rate-limit header logging) tracked as backlog.
+- _(2026-07-06)_ — **0007** escalated + amended (stays `[~]`). Implementor
+  completed D1/D2/D5 — rebuilt `:latest` (`d764187`, projection code present);
+  identified the live `ingestor-scheduler` cron (20 prior scheduled runs, **0**
+  `projection.built`, confirming F2's stale-image drift in production); schedule
+  restored — but D3/D4 blocked: two **back-to-back** autonomous full runs went
+  `partial` on transient 429s, so the `succeeded`-gated projection (D4) never
+  refreshed (gate proven correct; DoD gate unmet). Coordinator amended D3 to a
+  **single ISOLATED** autonomous fire (the 429s are likely self-inflicted by
+  rapid re-triggering — 0005 in isolation had 0 failures); §Files unchanged,
+  D1/D2/D5 evidence salvaged. Fallback wired: if the isolated fire is still
+  `partial`, the **partial-tolerance policy (0010)** becomes a precursor.

@@ -2,7 +2,23 @@
 
 **Roadmap item:** §1.11 — Scheduler redeploy (0003 finding F2)
 **Depends on:** 0001 (projection), 0004 (streaming), 0005 (full run PASS `a659f74`).
-**Status:** open
+**Status:** in progress — amended 2026-07-06
+
+> **Amendment 2026-07-06 (coordinator):** D1/D2/D5 completed cleanly, but the
+> D3/D4 "deployed AND verified" gate was blocked: two **back-to-back** autonomous
+> full-catalogue fires (~13 min apart, on top of 0005's manual full run — three
+> ~2,000-call runs inside ~90 min) both returned `partial` on transient **HTTP
+> 429** rate-limits, so the `succeeded`-gated projection (D4) never refreshed.
+> Root-cause hypothesis (see `notes/0007-scheduler-redeploy.md`): the 429s are
+> **self-inflicted by rapid re-triggering**, not a production defect — 0005 run
+> *in isolation* had 0 failures. **D3 is re-scoped below to a single ISOLATED
+> autonomous fire** (production's real one-run/day cadence), with a bounded,
+> API-friendly protocol. **§Files is unchanged** (procedural amendment, no new
+> file/code); D1/D2/D5 evidence already stands in `docs/DEPLOY_0007_EVIDENCE.md`,
+> so the resume only appends a clean isolated D3/D4. If the isolated fire is
+> *still* systematically `partial`, that confirms strict-`succeeded` gating is
+> unviable for a daily full run → STOP and escalate to the **partial-tolerance
+> policy (roadmap 0010)**, which then becomes a precursor to finishing 0007.
 
 ## Goal
 
@@ -43,21 +59,24 @@ output snippet).
 - Ensure it is running the way production runs it (e.g.
   `docker compose --profile scheduler up -d scheduler`).
 
-### D3 — Autonomous trigger (scheduled, NOT manual)
-- Make the live scheduler fire on its own within a couple of minutes **without**
-  running `make ingest` / `docker compose run` by hand. For the compose cron:
-  temporarily rewrite the crontab **inside the running container** to the next
-  minute, e.g.
+### D3 — Autonomous trigger (scheduled, NOT manual — and ISOLATED) [amended]
+D1/D2 are already done and evidenced in `docs/DEPLOY_0007_EVIDENCE.md`; this is
+the step to redo cleanly. **The first attempt failed only because three full
+runs fired inside ~90 min and self-induced 429s — so isolation is now mandatory.**
+- **Quiescence first:** confirm **no other full-catalogue run has fired for ≥2 h**
+  before arming (rapid back-to-back runs self-induce 429s — see Amendment).
+  Prefer letting the **real `0 2 * * *`** run be the isolated fire; a single
+  near-future test fire after a ≥2 h quiet window is equally acceptable.
+- Fire it via the scheduler itself (`crond` / Windows Task), **not** a hand-run
+  `make ingest` / `docker compose run`. For the compose cron: temporarily rewrite
+  the crontab **inside the running container** to one near-future minute, e.g.
   `docker exec ingestor-scheduler sh -c "echo '<next-min> * * * * docker compose -f /workspace/docker-compose.yml run --rm ingestor ingest >> /var/log/ingest.log 2>&1' | crontab -"`,
-  and let `crond` fire it. (For the Windows Task: set a near-future run time or
-  "Run" the task via the scheduler service — it must be the scheduler firing it,
-  not you invoking the CLI.)
-- The scheduled command is the real deployed one (full catalogue, no
-  `--leagues`). Expect `succeeded` (0005 showed the full catalogue succeeds and
-  refreshes). If it returns `partial` transiently, re-trigger once; if
-  **systematically** `partial` (so the projection never refreshes per D4), STOP
-  and escalate — that is the partial-tolerance policy, a later task, and it would
-  block the daily projection.
+  let `crond` fire it **once**, then (D5) restore `0 2 * * *`.
+- The command is the real deployed one (full catalogue, no `--leagues`).
+- **Bounded protocol (amended):** fire **exactly once**. Do **NOT** re-trigger
+  back-to-back on `partial` — it worsens the 429s (observed 3→9). If the single
+  isolated fire returns `partial`, STOP and escalate to the partial-tolerance
+  policy (roadmap 0010); do not keep hammering the API.
 
 ### D4 — Prove the scheduled run refreshed the projection
 - Evidence the run was **autonomous**: the scheduler's own log
@@ -111,10 +130,13 @@ NO repo/source/compose files. If one must change, STOP and escalate at
    code; image ID + `Created` timestamp recorded.
 2. D2: the production scheduler mechanism is identified in the evidence, with the
    note that it does not rebuild before running.
-3. D3/D4: an **autonomous** (crond/Task-fired, not manual) run of the rebuilt
-   image reached `ingestion_runs.status='succeeded'` — proven by a fresh
-   `ingestion_runs` row (finished_at after the trigger) **and** the scheduler's
-   own `ingest.log` showing the run + `projection.built rows=N`.
+3. D3/D4: a **single, isolated, autonomous** (crond/Task-fired, ≥2 h since any
+   prior full run, not manual) run of the rebuilt image reached
+   `ingestion_runs.status='succeeded'` — proven by a fresh `ingestion_runs` row
+   (finished_at after the trigger) **and** the scheduler's own `ingest.log`
+   showing the run + `projection.built rows=N`. [amended] If that isolated fire
+   is *still* `partial`, 0007 is legitimately blocked pending the partial-tolerance
+   policy (0010) — a valid escalation outcome, not an implementor failure.
 4. D4: `apifootball_events` was refreshed by that scheduled run — count `== N`,
    contract holds (`e_id` pattern, future `start`, constants), correlated to this
    run (not 0005's). This is the "deployed AND verified" gate.
