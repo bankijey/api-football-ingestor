@@ -192,19 +192,116 @@ as production expects. The near-future test crons (`8 19 …`, `21 19 …`) are 
 
 ---
 
-## Status: BLOCKED — escalated to coordinator
+# Amended attempt (coordinator amendment 2026-07-06) — single ISOLATED fire
+
+The first attempt's two back-to-back partials were hypothesised to be
+self-induced per-minute 429s; the amendment re-scoped D3 to **one isolated fire
+after a ≥2 h quiescence window** (production's real one-run/day cadence), fired
+**exactly once**, no re-trigger.
+
+## Quiescence (amended D3 precondition)
+
+Last full-catalogue fire before arming was `2026-07-06 17:21:03 UTC` (the 2nd
+partial). The isolated fire was armed only after the ≥2 h window elapsed —
+quiescence reached `2026-07-06 19:25:51 UTC`. No full run fired between 17:21 and
+the arm.
+
+## ARMED STATE (recorded for survive-teardown; disarmed immediately post-fire)
+
+The scheduler crontab was rewritten **inside the running container** to one
+near-future minute (container-local Europe/Berlin), then `crond` fired it once.
+
+```
+# Armed line (fires ONCE at 21:27 CEST = 19:27 UTC, then daily until disarmed):
+27 21 * * * docker compose -f /workspace/docker-compose.yml run --rm ingestor ingest >> /var/log/ingest.log 2>&1
+
+# Armed at:    2026-07-06 19:25:57 UTC (21:25:57 CEST); log baseline 92117 lines
+# Fired at:    2026-07-06 19:27:23 UTC (21:27 CEST) — crond, autonomous
+# RESTORE / DISARM command (returns crontab to production 0 2):
+echo '0 2 * * * docker compose -f /workspace/docker-compose.yml run --rm ingestor ingest >> /var/log/ingest.log 2>&1' | crontab -
+# Disarmed at: 2026-07-06 19:30:55 UTC (21:30:55 CEST) — restored to `0 2 * * *`
+```
+
+(The armed line was the plain production command, not self-disarming; because the
+fire had already happened, the crontab was disarmed manually at 19:30:55 UTC —
+the in-flight run is a detached container and is unaffected by the crontab edit.)
+
+## Isolated-fire RESULT — `failed` on DAILY-QUOTA exhaustion (not per-minute 429)
+
+The single isolated, autonomous run **failed** — but for a **different and more
+fundamental reason** than the first attempt's per-minute 429s: the **account's
+daily API request quota is exhausted**.
+
+```
+-- ingestion_runs row (bronze DB):
+run_id      | 851d7576-d250-4640-93c4-8fc2a606ca57
+status      | failed
+started_at  | 2026-07-06 19:27:08.650638+00
+finished_at | 2026-07-06 19:27:47.121367+00   (39 s — aborted at bootstrap)
+counters    | {"error": "RetryableHttpError: API in-body rate limit:
+               {'requests': 'You have reached the request limit for the day,
+                Go to https://dashboard.api-football.com to upgrade your plan.'}"}
+```
+
+- The error is an **HTTP-200-with-`errors`** in-body quota message (the API
+  quirk), classified `RetryableHttpError`; it hit the **`/leagues` bootstrap
+  call**. When the catalogue bootstrap fails after retries the run raises and
+  **aborts** (no work list can be built) → `status='failed'`, not `partial`.
+- **No `dead_letter` rows** for this run — consistent with a bootstrap abort
+  (per-item DLQ never engaged; the run died before per-league work).
+- This is **daily-quota depletion**, not the per-minute contention the amendment
+  hypothesised. Time-isolation (≥2 h quiet) does **not** restore a *daily* quota,
+  which resets once/day. So the isolated fire could not succeed today regardless.
+
+### Why the quota was spent (context)
+
+`DAILY_QUOTA=75000` in `.env` is only a **local guard**; the API account enforces
+its own daily cap, which is what was hit. Today saw **5 full-catalogue runs** on
+this key before the isolated fire — 2 `succeeded` (00:00 UTC real cron on the
+*stale* image; 16:05 UTC = 0005 manual) + 2 `partial` (17:08, 17:21) + repeated
+Phase-B fetches — and the scheduler log holds ~44 k lifetime `http.ok` calls.
+The bulk of today's budget was consumed by this task's own repeated testing
+(and possibly other consumers sharing the key). Exact remaining-quota headers are
+not logged (roadmap **0009**), so the precise cap/reset time is unconfirmed here.
+
+## D4 — projection correctly NOT refreshed (gate works; DoD gate still NOT met)
+
+- Zero `projection.built` lines in the isolated run (it never reached the
+  projection step — it aborted at bootstrap).
+- `apifootball_events` **unchanged**: `42399` rows, `max_start 2027-06-06
+  15:00:00+00`, `min_start 2026-07-06 16:30:00+00` — byte-for-byte the 0005
+  snapshot. The D4 gate (refresh only on `succeeded`) held: a `failed` run leaves
+  the prior snapshot fully intact.
+
+## D5 — schedule restored (again)
+
+Crontab disarmed to production `0 2 * * *` at `2026-07-06 19:30:55 UTC`
+(confirmed via `crontab -l`); `ingestor-scheduler` left `Up`. The real production
+run therefore remains scheduled for tonight **00:00 UTC (02:00 CEST)** — now on
+the rebuilt projection-carrying image (`d764187325a2`), and (if the daily quota
+resets by then) is the natural, already-scheduled vehicle for the D3/D4 proof.
+
+---
+
+## Status: BLOCKED — escalated to coordinator (daily-quota exhaustion)
 
 - **D1 met**: `:latest` rebuilt (`d764187325a2`, Created `2026-07-06T17:04:51Z`);
   import-check `ingestor.projection` exit 0.
 - **D2 met**: live scheduler identified (`ingestor-scheduler` compose cron); it
   does not rebuild before running.
-- **D3/D4 NOT met**: two consecutive autonomous runs were `partial` (3 then 9
-  transient 429s), so the projection never refreshed. The DoD's "scheduled run
-  reaches `succeeded` and refreshes `apifootball_events`" gate cannot be
-  satisfied under the current partial-on-429 behaviour.
-- **D5 met**: schedule restored.
+- **D3 done, D4 NOT met**: the amended single **isolated** autonomous fire
+  (`851d7576`, crond-fired after a ≥2 h quiescence window) ran — but **`failed`
+  on daily-quota exhaustion** at the `/leagues` bootstrap, so it never projected.
+  The earlier two partials were per-minute 429s; this is a distinct root cause.
+  No run can `succeed` on this key until the daily quota resets → the "deployed
+  AND verified" gate cannot be met **today**.
+- **D5 met**: schedule restored to `0 2 * * *`; real 00:00-UTC cron still armed
+  on the correct image.
+- **Lint/test**: `ruff` + `mypy --strict` clean; `pytest` **87 passed / 1 xfail /
+  0 skips** against the live bronze DB (zero repo code changed — baseline hygiene).
 
-Escalation note: [specs/implementor/notes/0007-scheduler-redeploy.md](../specs/implementor/notes/0007-scheduler-redeploy.md).
+Escalation note (root cause + options + recommendation):
+[specs/implementor/notes/0007-scheduler-redeploy.md](../specs/implementor/notes/0007-scheduler-redeploy.md).
 
 ---
 

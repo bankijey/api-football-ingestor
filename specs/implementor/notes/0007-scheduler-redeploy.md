@@ -1,6 +1,66 @@
-# 0007 escalation — autonomous scheduled run is systematically `partial` (429), projection never refreshes
+# 0007 escalation — autonomous scheduled run cannot reach `succeeded`; projection never refreshes
 
 **Action:** escalated. **To:** coordinator.
+
+---
+
+## UPDATE (amended attempt, 2026-07-06 ~19:30 UTC) — isolated fire `failed` on DAILY-QUOTA exhaustion
+
+The coordinator amendment re-scoped D3 to a **single isolated fire** after ≥2 h
+quiescence, on the hypothesis that the first attempt's partials were self-induced
+per-minute 429s. That isolated fire was executed exactly as amended — crond-fired
+run `851d7576` at 19:27 UTC, after a clean quiescence window (last prior fire
+17:21 UTC; quiescence reached 19:25:51 UTC) — and it **`failed`**, but on a
+**different, more fundamental** cause: the **account's daily API request quota is
+exhausted** ("You have reached the request limit for the day"). The error hit the
+**`/leagues` bootstrap**, so the run aborted in 39 s before building any work list
+(`status='failed'`, zero `dead_letter`, no projection step reached).
+
+**This changes the root cause.** The amendment's isolation hypothesis addressed
+*per-minute* 429 contention; the real blocker now is *daily* quota depletion,
+which **time-isolation cannot fix** (a daily quota resets once/day, not after 2 h
+of quiet). So **no run can `succeed` on this key until the quota resets** — the
+proof is impossible today. Context: 5 full-catalogue runs fired on this key today
+(2 succeeded incl. the 00:00-UTC stale-image cron, 2 partial, this failed) plus
+heavy Phase-B fetching; the budget was largely consumed by this task's own
+repeated testing (and possibly other consumers sharing the key). Exact
+remaining-quota is unlogged (roadmap **0009**), so the cap/reset time is
+unconfirmed.
+
+**Per the bounded protocol I did NOT re-trigger.** Crontab disarmed/restored to
+`0 2 * * *` at 19:30:55 UTC; the real production cron remains armed for tonight
+**00:00 UTC (02:00 CEST)** — now on the rebuilt projection-carrying image.
+
+### Revised options
+
+1. **Verify the already-scheduled real 2 am / 00:00-UTC cron (recommended).** It
+   is the amendment's *preferred* isolated vehicle, is already scheduled, now runs
+   the correct image (`d764187325a2`), and fires against tonight's quota reset. If
+   the daily quota resets by 00:00 UTC and no other consumer drains it first, that
+   run should `succeed` and `projection.built` → D3/D4 proven with **zero further
+   API spend today**. A verifier/fresh session checks `ingestion_runs` +
+   `apifootball_events` + the scheduler `ingest.log` tomorrow morning. Risk:
+   00:00 UTC sits on a common reset boundary — if the reset lags or the key is
+   shared, it too may fail; then options 2/3 apply.
+2. **Quota budgeting / dedicated key (→ 0008, possibly 0009 first).** If the real
+   daily cap is materially below the assumed 75 k, or the key is shared with the
+   scraper/matcher, a daily full run (~2 k calls) plus other load can exhaust it —
+   0008 (daily scheduling) must size against the *real* cap and isolate the key,
+   and 0009 (log `x-ratelimit-*-remaining`) should land first to measure it.
+3. **Do NOT relax the `succeeded` gate for this (0010 partial-tolerance is a red
+   herring here).** A quota-exhausted run `fails` at bootstrap with an *empty*
+   catalogue — there is nothing to project. Partial-tolerance addresses a few
+   failed leagues in an otherwise-complete run; it would not (and should not)
+   salvage a bootstrap-failed run. So 0010 is not the fix for this finding.
+
+**Recommendation:** option 1 — let the real 00:00-UTC cron be the proof and verify
+it tomorrow; queue option 2 (0009 quota measurement → 0008 quota-aware schedule +
+key isolation) as the durable fix. The systemic-drift hand-off to **0008** stands
+regardless.
+
+---
+
+## Original escalation (first attempt — two per-minute-429 partials) — retained as history
 
 ## Summary
 
