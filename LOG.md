@@ -32,3 +32,4 @@ Fields:
 2026-07-06 12:20 Berlin | verifier | 0003-live-smoke-exit-criteria | verified | PASS
 2026-07-06 15:42 Berlin | verifier | 0004-projection-hardening | verified | PASS
 2026-07-06 18:55 Berlin | verifier | 0005-full-catalogue-run | verified | PASS
+2026-07-06 19:35 Berlin | implementor | 0007-scheduler-redeploy | escalated | D1 rebuilt :latest (d764187325a2, import ingestor.projection ok) + D2 scheduler identified; D3/D4 BLOCKED — two autonomous crond-fired full runs both `partial` (phase_a failed 3 then 9, all transient 429 on fixtures_by_league), so projection gated off and apifootball_events unchanged at 42399 (0005 snapshot); D4 gate proven correct, DoD "succeeded+refresh" gate unmet; D5 crontab restored to `0 2 * * *`; note surfaces re-scope-to-isolated-fire (rec) vs partial-tolerance policy; evidence staged-uncommitted per carve-out; no repo code changed
