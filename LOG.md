@@ -24,3 +24,4 @@ Fields:
 2026-07-05 19:43 Berlin | verifier | 0001-apifootball-events-projection | verified | PASS
 2026-07-06 08:53 Berlin | coordinator | 0003-live-smoke-exit-criteria | drafted task | specs/coordinator/tasks/0003-live-smoke-exit-criteria.md — refined S5 (DLQ not code-free live; un-isolated /leagues bootstrap) + S1/S6 succeeded-gating note
 2026-07-06 12:04 Berlin | implementor | 0003-live-smoke-exit-criteria | executed live smoke | docs/SMOKE_0003_EVIDENCE.md — S1–S7 all pass (run 3ad05d60 succeeded, projection 39941 events, resume no-dup, invalid-key fail-safe); surfaced F1 (.env +psycopg2 DSN), F2 (deployed image predates 0001), F3 (projection perf ~6GiB/~12min cold); no production code changed
+2026-07-06 12:20 Berlin | verifier | 0003-live-smoke-exit-criteria | verified | PASS
