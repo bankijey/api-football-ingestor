@@ -3,6 +3,8 @@ atomic replace, and the runner's succeeded-only gate."""
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
@@ -147,6 +149,60 @@ def test_empty_bronze_yields_empty_table(pg_pool) -> None:
     n = build_projection(bronze_pool=pg_pool, matcher_pool=pg_pool, now_ts=_NOW)
     assert n == 0
     assert _fetch_all(pg_pool) == []
+
+
+# ---------- F3: bronze read streams via a server-side (named) cursor ----------
+
+class _ConnSpy:
+    """Records the ``name`` kwarg of every ``cursor(...)`` call, then delegates."""
+
+    def __init__(self, conn: Any, names: list[str | None]) -> None:
+        self._conn = conn
+        self._names = names
+
+    def cursor(self, *a: Any, **k: Any) -> Any:
+        self._names.append(k.get("name"))
+        return self._conn.cursor(*a, **k)
+
+    def __getattr__(self, n: str) -> Any:
+        return getattr(self._conn, n)
+
+
+class _PoolSpy:
+    """Wraps a ConnectionPool, yielding connections whose cursor calls are spied."""
+
+    def __init__(self, pool: Any, names: list[str | None]) -> None:
+        self._pool = pool
+        self._names = names
+
+    @contextmanager
+    def connection(self) -> Iterator[_ConnSpy]:
+        with self._pool.connection() as conn:
+            yield _ConnSpy(conn, self._names)
+
+    def __getattr__(self, n: str) -> Any:
+        return getattr(self._pool, n)
+
+
+def test_read_streams_with_server_side_cursor(pg_pool) -> None:
+    # Two latest league-season payloads: one qualifies (NS + future), one does
+    # not (FT + past). The projected row set must be exactly the qualifying one.
+    _seed(pg_pool, 39, 2025, [_fx(401, "NS", _NOW + 3600)])   # projects
+    _seed(pg_pool, 140, 2025, [_fx(402, "FT", _NOW - 3600)])  # dropped
+
+    names: list[str | None] = []
+    bronze_spy = _PoolSpy(pg_pool, names)
+
+    n = build_projection(bronze_pool=bronze_spy, matcher_pool=pg_pool, now_ts=_NOW)
+
+    # Output byte-identical to a client-side read: exactly the NS+future fixture.
+    assert n == 1
+    rows = _fetch_all(pg_pool)
+    assert [r["fixture_id"] for r in rows] == [401]
+    assert rows[0]["e_id"] == "apifootball;401"
+
+    # The bronze read used a NAMED (server-side) cursor — fails for an unnamed one.
+    assert any(name for name in names), f"expected a named cursor, got {names!r}"
 
 
 # ---------- AC6: runner gate is succeeded-only + configured ----------

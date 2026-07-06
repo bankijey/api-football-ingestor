@@ -89,17 +89,27 @@ def build_projection(
 # ---- internals ----
 
 
-def _read_rows(bronze_pool: ConnectionPool, now_ts: float) -> list[dict[str, Any]]:
-    with bronze_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(_LATEST_FIXTURES_SQL)
-        payloads = [r[0] for r in cur.fetchall()]
+_ITERSIZE = 200  # payloads resident per server-side fetch batch
 
+
+def _read_rows(bronze_pool: ConnectionPool, now_ts: float) -> list[dict[str, Any]]:
+    # Stream the latest league-season payloads with a psycopg2 named
+    # (server-side) cursor instead of materializing all ~thousands of large
+    # JSONB payloads at once (fetchall would peak at the full set — an OOM risk
+    # that grows with bronze). The named cursor is created and fully consumed
+    # inside the pool's transaction (connection.py:38-49), before commit.
     rows: list[dict[str, Any]] = []
-    for payload in payloads:
-        for fixture in (payload or {}).get("response") or []:
-            row = _to_row(fixture, now_ts)
-            if row is not None:
-                rows.append(row)
+    with (
+        bronze_pool.connection() as conn,
+        conn.cursor(name="apifootball_proj_read") as cur,
+    ):
+        cur.itersize = _ITERSIZE
+        cur.execute(_LATEST_FIXTURES_SQL)
+        for (payload,) in cur:
+            for fixture in (payload or {}).get("response") or []:
+                row = _to_row(fixture, now_ts)
+                if row is not None:
+                    rows.append(row)
     return rows
 
 

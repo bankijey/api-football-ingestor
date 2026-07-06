@@ -97,6 +97,20 @@ class Settings(BaseSettings):
             return [x.strip().upper() for x in v.split(",") if x.strip()]
         return v
 
+    @field_validator("matcher_db_dsn", mode="before")
+    @classmethod
+    def _normalize_matcher_dsn(cls, v: object) -> object:
+        """Strip a SQLAlchemy ``+<driver>`` suffix from the URL scheme so the
+        matcher's native ``postgresql+psycopg2://…`` POSTGRES_URL (D5) works with
+        raw psycopg2. Only the scheme token before ``://`` is touched; everything
+        after ``://`` is byte-identical. Empty/unset stays empty (projection off).
+        """
+        if not isinstance(v, str) or "://" not in v:
+            return v
+        scheme, rest = v.split("://", 1)
+        base = scheme.split("+", 1)[0]
+        return f"{base}://{rest}"
+
     @field_validator("log_level")
     @classmethod
     def _upper_log_level(cls, v: str) -> str:
