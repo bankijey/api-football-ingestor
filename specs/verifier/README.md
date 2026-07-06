@@ -98,3 +98,35 @@ fold into future tasks (NOT into this one — this one is done).
 - You don't edit `docs/ROADMAP.md`, `DECISIONS.md`, or `CLAUDE.md`.
 - You don't open follow-up tasks. You write findings; the coordinator opens
   the follow-up.
+
+## Closing summary — how you report in chat (required)
+
+The committed report keeps its precise PASS/FAIL-with-evidence format. Your
+**final chat message** each turn is different: it is read by a human who is
+learning senior data-engineering vocabulary — write it to teach while it
+reports. Structure (whole thing under ~15 lines):
+
+1. **Verdict first, one plain sentence** — "NNNN PASSED — all N acceptance
+   criteria green" / "NNNN FAILED on 2 of 9 criteria: <the two, in one clause
+   each>."
+2. **What was proven, in plain English** — 3–5 bullets. Not the checklist
+   restated: what the system now demonstrably does, and the strongest piece
+   of evidence for each claim ("re-running the ingest added 0 new rows —
+   that's the hash dedup working").
+3. **Keep the senior terms, gloss each inline on first use** — pattern:
+   *term (plain-English meaning)*. Examples: "acceptance criteria (the
+   testable pass/fail conditions agreed before the work started)",
+   "idempotent (safe to re-run — same result, no duplicates)", "corroborated
+   (I re-ran the queries myself instead of trusting the evidence file)",
+   "housekeeping (the process checks: only allowed files touched, no new
+   dependencies, clean working tree)". Gloss once per message, then use the
+   term bare.
+4. **Evidence line** — report path, the verified commit SHA, headline numbers
+   (tests, row counts, run status).
+5. **Next:** "Coordinator's turn — close the task" (or "— open the follow-up
+   for the failing criteria").
+
+Findings worth reading go in one plain sentence each ("I also noticed X —
+non-blocking, logged for the coordinator"). No unexplained acronyms. Do NOT
+dumb it down by dropping terminology — the reader wants to learn the terms;
+use them *and* gloss them.

@@ -81,3 +81,32 @@ You never open more than one task at a time.
 - You don't re-open a passed task.
 - You don't write tasks that span multiple roadmap items. One task = one
   roadmap checkbox.
+
+## Closing summary — how you report in chat (required)
+
+Committed artifacts (task specs, ROADMAP, LOG) keep their precise technical
+format. Your **final chat message** each turn is different: it is read by a
+human who is learning senior data-engineering vocabulary — write it to teach
+while it reports. Structure (whole thing under ~15 lines):
+
+1. **Outcome first, one plain sentence** — "I opened task NNNN: <what it
+   delivers, in one clause>" / "0003 failed verification; I opened a follow-up
+   scoped to the two failing criteria."
+2. **What and why, in plain English** — 3–5 bullets. What the task builds,
+   why now, what it deliberately does NOT do (scope), and what risk it
+   protects against.
+3. **Keep the senior terms, gloss each inline on first use** — pattern:
+   *term (plain-English meaning)*. Examples: "idempotent (safe to re-run —
+   same result, no duplicates)", "atomic swap (readers see the whole old
+   table or the whole new one, never a half-written state)", "hermetic test
+   (self-contained — no network or real DB)", "DLQ / dead-letter queue (a
+   table recording failed items so they can be retried later)", "quota-bounded
+   (sized to spend only a small, known slice of the API's daily call budget)".
+   Gloss once per message, then use the term bare.
+4. **Evidence line** — the concrete artifact: spec path, commit SHA, the
+   verifier verdict you acted on.
+5. **Next:** who acts next, on what (one line).
+
+No unexplained acronyms; name only the 1–3 files that matter and say what
+each is. Do NOT dumb it down by dropping terminology — the reader wants to
+learn the terms; use them *and* gloss them.

@@ -92,3 +92,35 @@ items contradict each other:
 
 Do not pre-fix the gap by editing files outside `§Files`. Even if the fix is
 one line, the boundary matters more than the convenience.
+
+## Closing summary — how you report in chat (required)
+
+Committed artifacts (code, tests, evidence files, LOG line, commit message)
+keep their precise technical format. Your **final chat message** each turn is
+different: it is read by a human who is learning senior data-engineering
+vocabulary — write it to teach while it reports. Structure (whole thing under
+~15 lines):
+
+1. **Outcome first, one plain sentence** — "Implemented NNNN: <what now works,
+   in one clause>; ready for the verifier." (Or, for an operational/smoke
+   task: "Smoke complete: <headline result>." Or, for an escalation: "Stopped
+   and escalated: <the blocker in one clause>.")
+2. **What changed / what was proven, in plain English** — 3–5 bullets. What
+   the system now does that it didn't before, and how you proved it (which
+   tests or live evidence, what they assert). Explain behavior, not just file
+   names.
+3. **Keep the senior terms, gloss each inline on first use** — pattern:
+   *term (plain-English meaning)*. Examples: "idempotent (safe to re-run —
+   same result, no duplicates)", "checkpointed resume (the run records
+   per-item progress, so a crash restarts where it left off)", "atomic swap
+   (readers see the whole old table or the whole new one, never a half-written
+   state)", "hermetic (self-contained — no network or real DB)", "bronze
+   (the raw, append-only layer — payloads stored exactly as received)".
+   Gloss once per message, then use the term bare.
+4. **Evidence line** — test counts / row counts / run status, lint status,
+   the commit SHA.
+5. **Next:** "Verifier's turn" (or "Coordinator's turn" on escalation).
+
+No unexplained acronyms; name only the 1–3 files that matter and say what
+each does. Do NOT dumb it down by dropping terminology — the reader wants to
+learn the terms; use them *and* gloss them.
