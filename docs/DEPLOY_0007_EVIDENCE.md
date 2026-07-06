@@ -318,3 +318,131 @@ registry-pull vs CI/CD. Do NOT patch `docker-compose.yml`/`Dockerfile` inside
 0007 (out of scope). Rebuilding `:latest` by hand (D1) papers over it only until
 the next code change.
 
+
+---
+
+# Re-attempt (2026-07-06 ~22:07 CEST) — daily quota verified HEALTHY, self-disarming fire
+
+**Correction to the prior finding.** A `/status` probe (a meta endpoint that does
+**not** consume the request quota) shows the daily quota is **not** exhausted:
+
+```
+$ curl -s "$BASE/status" -H "x-rapidapi-key: <redacted>" -H "x-rapidapi-host: v3.football.api-sports.io"
+account: bankianthony@gmail.com
+plan: {'plan': 'Ultra', 'end': '2026-08-06...', 'active': True}
+requests today: {'current': 9144, 'limit_day': 75000}     # ~12% used, ~65,856 free
+```
+
+So the isolated run `851d7576`'s in-body "reached the request limit for the day"
+message was **spurious/transient** (most likely a per-minute burst the API
+mislabelled, possibly from other consumers sharing this key) — the account had
+~88% of its daily budget free. The blocker is therefore **not** daily-quota
+depletion; a fresh run is worth attempting. This re-attempt fires one more
+isolated run with quota confirmed available.
+
+## ARMED STATE (self-disarming; recorded before arming for survive-teardown)
+
+Container clock at arm time: `22:07:37 CEST`. Log baseline: 92176 lines. Last
+substantial full run fired 17:21 UTC (the 19:27 run aborted in 39 s), so the
+window is isolated.
+
+```
+# Self-disarming armed line (fires ONCE at 22:12 CEST = 20:12 UTC, then the
+# command itself restores the production `0 2` crontab after the run):
+12 22 * * * docker compose -f /workspace/docker-compose.yml run --rm ingestor ingest >> /var/log/ingest.log 2>&1; echo '0 2 * * * docker compose -f /workspace/docker-compose.yml run --rm ingestor ingest >> /var/log/ingest.log 2>&1' | crontab -
+
+# Manual RESTORE / DISARM (if ever needed before the self-disarm runs):
+echo '0 2 * * * docker compose -f /workspace/docker-compose.yml run --rm ingestor ingest >> /var/log/ingest.log 2>&1' | crontab -
+```
+
+Because the entry **self-disarms** (runs ingest, then rewrites the crontab back
+to `0 2 * * *`), a session teardown between arming and cleanup leaves production
+correct on its own once the run finishes; a fresh session/human can also disarm
+with the manual command above straight from this block.
+
+## Re-attempt RESULT — `succeeded` and PROJECTION REFRESHED ✅ (gate MET)
+
+The single self-disarming, **crond-fired** run reached `succeeded` and refreshed
+the projection — the "deployed AND verified" gate.
+
+**Autonomous & succeeded** (scheduler's own `/var/log/ingest.log`, not a manual
+`make ingest`):
+
+```
+{"status": "succeeded", "counters": {"leagues_total": 1231, "fixtures_total": 316,
+  "phase_a": {"ok": 10, "unchanged": 1221, "failed": 0},
+  "phase_b": {"ok": 37, "unchanged": 595, "failed": 0}},
+ "event": "run.done", "run_id": "ec38234d-109a-4f3b-a8eb-fc5cc590bd60",
+ "timestamp": "2026-07-06T20:20:27.876043Z"}
+
+# ingestion_runs (bronze DB): ec38234d-109a-4f3b-a8eb-fc5cc590bd60 | succeeded
+#   started 2026-07-06 20:12:23 UTC | finished 2026-07-06 20:20:27 UTC
+```
+
+Fired autonomously at **20:12:13 UTC (22:12 CEST)** by `crond` — 0 Phase-A and
+0 Phase-B failures (the healthy daily quota bore out the `/status` probe).
+
+**Projected** (the scheduled run's log, `run_id` correlated):
+
+```
+{"rows": 42383, "event": "projection.built",       "run_id": "ec38234d-...", "timestamp": "2026-07-06T20:22:43.170575Z"}
+{"rows": 42383, "event": "run.projection_written", "run_id": "ec38234d-...", "timestamp": "2026-07-06T20:22:43.204417Z"}
+```
+
+The projection ran ~135 s **after** `run.done` (streaming bronze read → atomic
+swap), so intermediate log checks before ~20:23 UTC correctly showed it still in
+flight.
+
+**Sources DB refreshed** (`apifootball_events`, correlated to THIS run — the row
+count changed from 0005's 42399 → **42383**, and `min_start` advanced from
+16:30 → 21:00 UTC as elapsed events dropped out):
+
+```
+ rows  |       max_start        |       min_start        | all_future
+ 42383 | 2027-06-06 15:00:00+00 | 2026-07-06 21:00:00+00 |    t
+```
+
+**D6 column contract — all 42,383 rows pass every check:**
+
+```
+ total | eid_ok | bkmkr_ok | sport_ok | url_null_ok | future_ok | core_fields_ok
+ 42383 | 42383  |  42383   |  42383   |   42383     |   42383   |     42383
+-- eid_ok       : e_id ~ '^apifootball;[0-9]+$'   (semicolon delimiter, D6)
+-- bkmkr_ok     : bookmaker_id = 'apifootball'
+-- sport_ok     : sport_key = 'football'
+-- url_null_ok  : url IS NULL
+-- future_ok    : start > now()                    (D3 NS+future)
+-- core_fields  : tid, home_team, away_team all present
+
+# sample: e_id=apifootball;1525241 | bookmaker_id=apifootball | sport_key=football
+#         start=2026-07-06 21:00:00+00 | tid=256 | tournament="USL League Two"
+#         home_team="Lansing City" | away_team="Flint City Bucks" | url=NULL
+```
+
+**D5 — self-disarm confirmed:** after the run, the crontab restored **itself** to
+`0 2 * * *` (verified via `crontab -l` at 20:23 UTC) — no manual restore needed.
+`ingestor-scheduler` left `Up`; production is armed for the next 00:00-UTC run on
+the projection-carrying image.
+
+---
+
+## FINAL STATUS: PASS — deployed AND verified ✅
+
+| DoD | Result |
+|-----|--------|
+| **D1** rebuilt `:latest` carries projection | ✅ `d764187325a2`, import-check exit 0 |
+| **D2** live scheduler identified (no build step) | ✅ `ingestor-scheduler` compose cron |
+| **D3** autonomous, isolated, crond-fired run | ✅ `ec38234d`, fired 20:12:13 UTC, 0 failures |
+| **D4** scheduled run `succeeded` **and** refreshed projection | ✅ `projection.built rows=42383`; `apifootball_events`=42383; D6 contract 42383/42383; correlated to `ec38234d` |
+| **D5** schedule restored to `0 2 * * *` | ✅ self-disarmed automatically |
+| **AC6** drift hand-off to 0008 | ✅ below |
+| **AC7** diff = evidence/roadmap/log only | ✅ no repo code/compose changed |
+| **AC8** no secrets committed | ✅ DSNs redacted, key never printed |
+
+**Note on the intermediate `failed` run (`851d7576`, 19:27 UTC):** its in-body
+"reached the request limit for the day" message was **spurious** — the `/status`
+probe showed only 9,144/75,000 daily requests used, and this clean `succeeded`
+re-attempt on the same key ~45 min later confirms the quota was never the
+blocker. The likely cause was a transient per-minute burst mislabelled by the API
+(possibly other consumers sharing the key). Worth logging the `x-ratelimit-*`
+headers (roadmap **0009**) to disambiguate future occurrences.

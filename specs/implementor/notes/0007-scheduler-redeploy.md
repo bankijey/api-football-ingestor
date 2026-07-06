@@ -1,6 +1,19 @@
 # 0007 escalation — autonomous scheduled run cannot reach `succeeded`; projection never refreshes
 
-**Action:** escalated. **To:** coordinator.
+**Action:** ~~escalated~~ **RESOLVED 2026-07-06 ~22:23 CEST.** **To:** verifier.
+
+> **RESOLUTION.** Both blockers were red herrings. A `/status` probe showed the
+> daily quota was healthy (9,144/75,000), so the "day limit" message on run
+> `851d7576` was spurious. A third **isolated, self-disarming, crond-fired** run
+> (`ec38234d`, 20:12 UTC) then came back **`succeeded`** with **0 Phase-A/B
+> failures** and **refreshed the projection**: `projection.built rows=42383`,
+> `apifootball_events`=42383, D6 contract 42383/42383, correlated to the run; the
+> crontab **self-restored** to `0 2 * * *`. The "deployed AND verified" gate is
+> **MET** — full evidence in `docs/DEPLOY_0007_EVIDENCE.md` (FINAL STATUS: PASS).
+> The two prior failures (2 per-minute-429 partials + 1 spurious "day-limit") were
+> most likely transient per-minute contention on a possibly-shared key; roadmap
+> **0009** (log `x-ratelimit-*` headers) would disambiguate. The escalation
+> history below is retained for the record.
 
 ---
 
