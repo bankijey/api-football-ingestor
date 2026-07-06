@@ -180,18 +180,24 @@ populated in the sources DB) — which gates the matcher's live smoke
       NS+future only. Evidence recorded to `docs/SMOKE_0003_EVIDENCE.md`;
       verifier corroborates by re-querying. Spec:
       `specs/coordinator/tasks/0003-live-smoke-exit-criteria.md`.
-- [~] **0004** — Projection hardening before the full run (0003 verifier
+- [x] **0004** — Projection hardening before the full run (0003 verifier
       findings F3 + F1): stream the bronze read via a server-side cursor so the
       projection no longer loads all ~7,894 league-season payloads into memory
       (~6 GiB), and normalize the `MATCHER_DB_DSN` `+driver` dialect suffix so a
       matcher-copied SQLAlchemy URL works with raw psycopg2. Output-preserving
       (D2/D3/D4/D6 unchanged). Gates 0005. Spec:
       `specs/coordinator/tasks/0004-projection-hardening.md`.
-- [ ] **0005** — Full-catalogue daily run (all ~1,500 leagues) once 0004 is
-      green: the unbounded version of the same evidence, plus quota/duration
-      observations to size the daily schedule. (Deliberately sequenced after the
-      bounded smoke + projection hardening — the smoke proves every mechanism at
-      ~1% of the quota first, and 0004 de-risks the projection's memory ceiling.)
+- [~] **0005** — Full-catalogue live run (all ~1,500 current-season leagues),
+      once 0004 is green: one unbounded run for real quota + wall-clock numbers
+      to size the daily schedule, and the true full-scale failure rate.
+      Mechanisms (dedup/resume/DLQ-retry) are already proven at ~1% scale in
+      0003, so this run does NOT re-prove them — it characterizes scale,
+      cost, duration, and terminal status. Expected to come back `partial`
+      (binary `_terminal_status`), which per D4 means the projection does not
+      refresh — recorded as data, with the partial-tolerance policy left as a
+      follow-up that needs this run's numbers. Evidence to
+      `docs/FULLRUN_0005_EVIDENCE.md`; verifier corroborates by re-querying. Spec:
+      `specs/coordinator/tasks/0005-full-catalogue-run.md`.
 - [ ] **0006** — Fix timing-flaky `test_heartbeat_ticks_at_interval` (0003
       finding V1): the assertion of ≥3 ticks in a 180 ms window at a 50 ms
       interval overshoots under CPU saturation (Windows ~15 ms timer). Make it
@@ -262,3 +268,14 @@ populated in the sources DB) — which gates the matcher's live smoke
   `MATCHER_DB_DSN` dialect normalization) **before** the expensive full-catalogue
   run — which is renumbered **0005**. Findings V1 (flaky heartbeat test) and F2
   (stale scheduler image) tracked as **0006**/**0007**.
+- _(2026-07-06)_ — **0004** done (verifier PASS, `11493f4`): projection hardening.
+  `_read_rows` now streams `bronze_fixtures` via a psycopg2 server-side named
+  cursor (`apifootball_proj_read`, itersize 200) instead of `fetchall()`-ing all
+  ~7,894 payloads — output byte-identical (all 5 pre-existing `test_projection.py`
+  tests green, D2/D3/D4/D6 untouched). `MATCHER_DB_DSN` gains a scheme validator
+  stripping the `+driver` suffix (F1). 87 tests pass, lint/mypy clean.
+  **0005** opened: the full-catalogue live run — one unbounded run to size the
+  daily schedule (quota + duration) and characterize the full-scale failure rate.
+  Designed observational: `partial` (and thus no projection refresh per D4) is
+  expected DATA, and its failure numbers are the input a future partial-tolerance
+  policy needs — so the run rightly precedes that policy call.
