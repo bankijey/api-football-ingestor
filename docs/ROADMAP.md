@@ -170,7 +170,7 @@ populated in the sources DB) — which gates the matcher's live smoke
 (`arbibet-matcher` Phase B).
 
 ### 1.11 Live smoke (evidence-based, quota-bounded)
-- [ ] **0003** — Quota-bounded live smoke: real API key, handpicked league
+- [~] **0003** — Quota-bounded live smoke: real API key, handpicked league
       subset via `--leagues` (~5–10 leagues, current season). Proves, with
       DB/ledger evidence (not pytest): full run `succeeded`; Phase B rich data +
       halftime stats landed; immediate re-run inserts ≈0 bronze rows (hash

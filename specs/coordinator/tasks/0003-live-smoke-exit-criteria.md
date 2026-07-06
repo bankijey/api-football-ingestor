@@ -53,12 +53,28 @@ snippet).
   pending→succeeded without re-doing completed keys; no duplicate bronze rows
   (per-endpoint counts equal to a single clean run's).
 
-### S5 — DLQ + retryability (exit criterion)
-- Deterministic failure: one tiny run with an **invalid API key** (env
-  override for that invocation only) so fetches fail terminally.
-- Evidence: `dead_letter` rows with error class + endpoint populated. Then
-  re-run with the valid key: the same items succeed (retryable proven).
-  Restore env afterwards; note both invocations in the evidence file.
+### S5 — Failure boundary + recovery (exit criterion: DLQ + retryable)
+The per-item `dead_letter` mechanic (a failed league/fixture fetch is isolated,
+recorded in `dead_letter` with error class + endpoint, its checkpoint marked
+`failed` while siblings still `succeed`) is **not code-free reachable live**:
+every operator-controlled failure lever (invalid key, bad host, no network) is
+*global*, so it fails the **un-isolated `/leagues` bootstrap**
+(`runner.py:147`, outside `run_phase_a`'s try/except) first and aborts the run
+before any per-item `record_failure` runs — no `dead_letter` row is written.
+That mechanic is therefore proven **hermetically** by
+`tests/test_orchestrator.py::test_phase_a_isolates_one_failing_league`
+(isolated 500 → exactly one `dead_letter` row + one `failed` checkpoint,
+siblings `succeeded`), re-run green live under S7. What this step proves *live*
+is that the failure boundary is **safe and recoverable**:
+- **S5a (fail fast & safe):** re-run S1's args with an **invalid API key** (env
+  override for that single invocation only; never touch `.env`). Evidence: the
+  run does NOT reach `status='succeeded'`; bronze row counts across all four
+  bronze tables are **unchanged** vs. the pre-S5a snapshot (a failed bootstrap
+  writes no bronze); and per D4 the `apifootball_events` snapshot is
+  **unchanged** (projection runs only on `succeeded`).
+- **S5b (retryable/recovery):** restore the valid key and re-run: the run
+  reaches `status='succeeded'` again — the work the invalid-key run could not do
+  now completes. Note both invocations + the env restore in the evidence file.
 
 ### S6 — Projection E2E (the 0001 handshake, gates matcher Phase B)
 - After S1's `succeeded` run, query the **sources DB**:
@@ -99,8 +115,12 @@ NO production/source files. If one must change, STOP and escalate at
 3. S3: re-run bronze delta ≈ 0 rows (exact counts recorded);
    `last_checked_at` advanced, `last_changed_at` unchanged (sample).
 4. S4: killed run + `--resume` reaches `succeeded`, no duplicate bronze rows.
-5. S5: invalid-key run produces `dead_letter` rows; valid-key re-run succeeds
-   on the same items (retryable).
+5. S5: the invalid-key run does NOT reach `succeeded` and leaves bronze (all
+   four tables) + the `apifootball_events` snapshot byte-for-byte unchanged (D4
+   boundary); the valid-key re-run reaches `succeeded`. The per-item
+   `dead_letter`+retryable mechanic is confirmed via S7's `make test`
+   (`test_phase_a_isolates_one_failing_league`), NOT via the live invalid-key
+   run (see S5 for why it is not code-free reachable live).
 6. S6: `apifootball_events` in the sources DB is non-empty, all `e_id`s match
    `^apifootball;[0-9]+$`, all `start` in the future, constants correct; and
    the snapshot re-refreshed on S3's re-run.
@@ -123,9 +143,23 @@ NO production/source files. If one must change, STOP and escalate at
   Copy actual command output into the evidence file — summaries don't count.
 - The projection hook only fires when `MATCHER_DB_DSN` is set (accepted 0001
   guard) — confirm env is loaded before S1 or S6 will be vacuously empty.
+- **S1/S6 need a `succeeded` run, not `partial`.** `_terminal_status`
+  (`runner.py:194`) returns `succeeded` only when Phase A *and* Phase B have zero
+  failures; a single flaky fixture (e.g. a transient 200-with-`errors`) yields
+  `partial`, and per D4 the projection will NOT refresh — so S6 would go stale.
+  If a run comes back `partial` from transient noise, narrow the `--leagues`
+  subset / re-run to obtain a clean `succeeded` run for S6. A **deterministic**
+  `partial` (the same item fails every time) is a STOP-and-escalate finding, not
+  something to paper over.
 - S4's kill must be ungraceful (SIGKILL, not Ctrl-C twice politely) — the point
-  is checkpoint recovery, not graceful shutdown.
+  is checkpoint recovery, not graceful shutdown. Capture the killed run's
+  `run_id` (from `ingestion_runs` / the `run.start` log) before killing — you
+  need it for `--resume`.
 - S5: override the key via the environment for that single invocation; never
-  edit `.env` in a way that could get committed.
+  edit `.env` in a way that could get committed. Do NOT chase a live
+  `dead_letter` row — the invalid key aborts at the un-isolated `/leagues`
+  bootstrap before the DLQ path runs (that asymmetry is a known, arguably-correct
+  observation — no work list ⇒ nothing to isolate — record it, don't fix it).
+  Prove S5a (fail-safe) and S5b (recovery) instead.
 - If any step fails, STOP at that step, capture the evidence, and escalate —
   a failed smoke that surfaces a real bug is a *successful* smoke.

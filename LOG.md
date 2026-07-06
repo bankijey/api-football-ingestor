@@ -22,3 +22,4 @@ Fields:
 2026-07-05 19:48 Berlin | coordinator | 0001-apifootball-events-projection | re-routed | 0002 PASS (c582c95) closed §1.8 [x]; tree disentangled, 0001 unblocked and re-routed to implementor — spec Resolution note added
 2026-07-05 19:50 Berlin | implementor | 0001-apifootball-events-projection | implemented | apifootball_events projection + atomic swap + succeeded-gated runner hook; ruff/mypy/pytest 3.12 green (85 passed)
 2026-07-05 19:43 Berlin | verifier | 0001-apifootball-events-projection | verified | PASS
+2026-07-06 08:53 Berlin | coordinator | 0003-live-smoke-exit-criteria | drafted task | specs/coordinator/tasks/0003-live-smoke-exit-criteria.md — refined S5 (DLQ not code-free live; un-isolated /leagues bootstrap) + S1/S6 succeeded-gating note
