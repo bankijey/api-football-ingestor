@@ -170,7 +170,7 @@ populated in the sources DB) — which gates the matcher's live smoke
 (`arbibet-matcher` Phase B).
 
 ### 1.11 Live smoke (evidence-based, quota-bounded)
-- [~] **0003** — Quota-bounded live smoke: real API key, handpicked league
+- [x] **0003** — Quota-bounded live smoke: real API key, handpicked league
       subset via `--leagues` (~5–10 leagues, current season). Proves, with
       DB/ledger evidence (not pytest): full run `succeeded`; Phase B rich data +
       halftime stats landed; immediate re-run inserts ≈0 bronze rows (hash
@@ -180,10 +180,27 @@ populated in the sources DB) — which gates the matcher's live smoke
       NS+future only. Evidence recorded to `docs/SMOKE_0003_EVIDENCE.md`;
       verifier corroborates by re-querying. Spec:
       `specs/coordinator/tasks/0003-live-smoke-exit-criteria.md`.
-- [ ] **0004** — Full-catalogue daily run (all ~1,500 leagues) once 0003 is
+- [~] **0004** — Projection hardening before the full run (0003 verifier
+      findings F3 + F1): stream the bronze read via a server-side cursor so the
+      projection no longer loads all ~7,894 league-season payloads into memory
+      (~6 GiB), and normalize the `MATCHER_DB_DSN` `+driver` dialect suffix so a
+      matcher-copied SQLAlchemy URL works with raw psycopg2. Output-preserving
+      (D2/D3/D4/D6 unchanged). Gates 0005. Spec:
+      `specs/coordinator/tasks/0004-projection-hardening.md`.
+- [ ] **0005** — Full-catalogue daily run (all ~1,500 leagues) once 0004 is
       green: the unbounded version of the same evidence, plus quota/duration
-      observations to size the daily schedule. (Deliberately sequenced second —
-      the bounded smoke proves every mechanism at ~1% of the quota first.)
+      observations to size the daily schedule. (Deliberately sequenced after the
+      bounded smoke + projection hardening — the smoke proves every mechanism at
+      ~1% of the quota first, and 0004 de-risks the projection's memory ceiling.)
+- [ ] **0006** — Fix timing-flaky `test_heartbeat_ticks_at_interval` (0003
+      finding V1): the assertion of ≥3 ticks in a 180 ms window at a 50 ms
+      interval overshoots under CPU saturation (Windows ~15 ms timer). Make it
+      tolerant (fake clock / lower threshold / retry). Green-baseline hygiene —
+      every future S7/`make test` gate depends on it.
+- [ ] **0007** — Rebuild + redeploy the scheduler image (0003 finding F2): the
+      deployed image predated 0001, so the scheduler was running pre-projection
+      code (why `apifootball_events` never existed until the smoke). Ops task, no
+      repo code change. Sequence with 0005's scheduling work.
 
 ---
 
@@ -233,3 +250,15 @@ populated in the sources DB) — which gates the matcher's live smoke
   — the projection loop's terminal deliverable.** Remaining Phase-1 exit criteria
   1–2 (full run across the live league set; Phase B live rich-data) need a
   real-API smoke run.
+- _(2026-07-06)_ — **0003** done (verifier PASS, `8e69672`): the quota-bounded
+  live smoke — first-ever real-API run. All six Phase-1 exit criteria proven live
+  with DB/ledger evidence (S1 succeeded run, S2 rich data, S3 hash-dedup re-run,
+  S4 kill+resume no-dup, S5 fail-safe+recovery, S7 hermetic gates) plus S6
+  projection E2E (`apifootball_events` populated in the sources DB, 39,942 rows,
+  NS+future, `apifootball;<id>` contract) — which **unblocks the matcher's Phase B
+  live smoke**. Verifier surfaced four non-blocking findings, routed as follow-ups.
+  **0004** opened (coordinator, human-confirmed sequencing): harden the projection
+  path (F3 server-side-cursor streaming to kill the ~6 GiB fetchall; F1
+  `MATCHER_DB_DSN` dialect normalization) **before** the expensive full-catalogue
+  run — which is renumbered **0005**. Findings V1 (flaky heartbeat test) and F2
+  (stale scheduler image) tracked as **0006**/**0007**.
