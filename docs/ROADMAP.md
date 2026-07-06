@@ -125,13 +125,17 @@ Silver and Gold are explicitly OUT OF SCOPE until this phase is complete.
       (plus `build`, `migrate`, `shell`, `psql`, `clean`)
 - [x] README quickstart (clone → .env → make up → make ingest)
 
-### Phase 1 exit criteria
-- [ ] A full daily run completes across the configured league set
-- [ ] Phase B correctly fetches rich data + halftime stats for recent fixtures
-- [ ] Re-running immediately stores ~0 new rows (hash dedup proven)
-- [ ] A simulated mid-run crash resumes cleanly with no duplicates
-- [ ] Failed leagues/fixtures land in dead_letter and are retryable
-- [ ] All tests pass against a mocked API; lint/type-check clean
+### Phase 1 exit criteria — ALL MET (0003 bounded live + 0005 full live)
+- [x] A full daily run completes across the configured league set
+      — 0005: 1,231-league run `succeeded` in 541 s (verifier PASS `a659f74`).
+- [x] Phase B correctly fetches rich data + halftime stats for recent fixtures
+      — 0003 S2 + 0005 (phase_b ok=208).
+- [x] Re-running immediately stores ~0 new rows (hash dedup proven) — 0003 S3.
+- [x] A simulated mid-run crash resumes cleanly with no duplicates — 0003 S4.
+- [x] Failed leagues/fixtures land in dead_letter and are retryable
+      — proven hermetically (`test_phase_a_isolates_one_failing_league`); the
+        live per-item DLQ path is not code-free reachable (0003 S5 rationale).
+- [x] All tests pass against a mocked API; lint/type-check clean — every cycle.
 
 ---
 
@@ -187,26 +191,34 @@ populated in the sources DB) — which gates the matcher's live smoke
       matcher-copied SQLAlchemy URL works with raw psycopg2. Output-preserving
       (D2/D3/D4/D6 unchanged). Gates 0005. Spec:
       `specs/coordinator/tasks/0004-projection-hardening.md`.
-- [~] **0005** — Full-catalogue live run (all ~1,500 current-season leagues),
-      once 0004 is green: one unbounded run for real quota + wall-clock numbers
-      to size the daily schedule, and the true full-scale failure rate.
-      Mechanisms (dedup/resume/DLQ-retry) are already proven at ~1% scale in
-      0003, so this run does NOT re-prove them — it characterizes scale,
-      cost, duration, and terminal status. Expected to come back `partial`
-      (binary `_terminal_status`), which per D4 means the projection does not
-      refresh — recorded as data, with the partial-tolerance policy left as a
-      follow-up that needs this run's numbers. Evidence to
-      `docs/FULLRUN_0005_EVIDENCE.md`; verifier corroborates by re-querying. Spec:
+- [x] **0005** — Full-catalogue live run (all ~1,500 current-season leagues):
+      one unbounded run for real quota + wall-clock numbers to size the daily
+      schedule, and the full-scale failure rate. Came back **`succeeded`**
+      (1,231 leagues, 0 failures), projection refreshed to 42,399 rows;
+      2,021 calls ≈ 2.7 % of daily quota, ~12 min. Verifier PASS `a659f74`.
+      Evidence: `docs/FULLRUN_0005_EVIDENCE.md`. Spec:
       `specs/coordinator/tasks/0005-full-catalogue-run.md`.
+- [~] **0007** — Rebuild + redeploy the ingestor image and **prove the
+      autonomous scheduled run refreshes `apifootball_events`** (0003 finding
+      F2). The deployed 2am cron runs `docker compose run --rm ingestor ingest`
+      with **no build step**, so it uses a stale pre-0001 `:latest` — production
+      has never autonomously refreshed the projection. DoD = "deployed AND
+      verified": a crond-fired run of the rebuilt image reaches `succeeded` and
+      refreshes the sources-DB table, proven from the scheduler's own log — not a
+      manual `make ingest`. Zero repo change. Spec:
+      `specs/coordinator/tasks/0007-scheduler-redeploy.md`.
+- [ ] **0008** — Daily scheduling: operationalize the daily run using 0005's
+      sizing (~12 min, ~2.7 % quota, one run/day). Owns the **anti-drift redeploy
+      strategy** — the scheduled path currently never rebuilds `:latest`, so it
+      silently goes stale (root cause of F2/0007); decide rebuild-on-cron vs
+      registry-pull vs CI/CD. Depends on 0007.
 - [ ] **0006** — Fix timing-flaky `test_heartbeat_ticks_at_interval` (0003
-      finding V1): the assertion of ≥3 ticks in a 180 ms window at a 50 ms
-      interval overshoots under CPU saturation (Windows ~15 ms timer). Make it
-      tolerant (fake clock / lower threshold / retry). Green-baseline hygiene —
-      every future S7/`make test` gate depends on it.
-- [ ] **0007** — Rebuild + redeploy the scheduler image (0003 finding F2): the
-      deployed image predated 0001, so the scheduler was running pre-projection
-      code (why `apifootball_events` never existed until the smoke). Ops task, no
-      repo code change. Sequence with 0005's scheduling work.
+      finding V1): ≥3 ticks in a 180 ms window at a 50 ms interval overshoots
+      under CPU saturation (Windows ~15 ms timer). Make it tolerant (fake clock /
+      lower threshold / retry). Green-baseline hygiene. Sequence after 0008.
+- [ ] **0009** — Persist per-minute `x-ratelimit-*-remaining` headers (0005
+      finding 1): the client does not log them, so schedule-sizing used a derived
+      throughput average, not exact headroom. Small observability change. Backlog.
 
 ---
 
@@ -279,3 +291,15 @@ populated in the sources DB) — which gates the matcher's live smoke
   Designed observational: `partial` (and thus no projection refresh per D4) is
   expected DATA, and its failure numbers are the input a future partial-tolerance
   policy needs — so the run rightly precedes that policy call.
+- _(2026-07-06)_ — **0005** done (verifier PASS, `a659f74`): the full-catalogue
+  live run came back **`succeeded`** — 1,231 leagues, 0 Phase A/B failures, 541 s
+  bronze + ~164 s projection, 2,021 API calls (~2.7 % of the 75k daily quota,
+  ~37× margin), projection refreshed to 42,399 rows. Not the anticipated
+  `partial`, so the partial-tolerance policy still has no real failure numbers
+  (deferred). **All Phase 1 exit criteria now met.** Human steered the next arc to
+  operationalization: **0007** opened — rebuild the stale deployed image and prove
+  the *autonomous* 2am schedule (not a manual `make ingest`) refreshes
+  `apifootball_events`, since the cron path never rebuilds `:latest` and has run
+  pre-projection code in production. Sequenced after: **0008** daily scheduling
+  (owns the anti-drift redeploy strategy), then **0006** flaky test; **0009**
+  (rate-limit header logging) tracked as backlog.
