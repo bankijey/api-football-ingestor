@@ -68,7 +68,10 @@ services:
         mkdir -p /var/log && touch /var/log/ingest.log
         # Write the crontab (0 2 * * * = 02:00 daily, in $TZ).
         # No --season flag: the runner rides whatever the API marks current per league.
-        echo '0 2 * * * docker compose -f /workspace/docker-compose.yml run --rm ingestor ingest >> /var/log/ingest.log 2>&1' \
+        # --build rebuilds the ingestor image from the /workspace source before each
+        # run, so a code change can never leave the 2am run on a stale image
+        # (anti-drift, task 0008). Build output shares the same log redirect.
+        echo '0 2 * * * docker compose -f /workspace/docker-compose.yml run --build --rm ingestor ingest >> /var/log/ingest.log 2>&1' \
           | crontab -
         crond -f -l 6
     profiles: ["scheduler"]

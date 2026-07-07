@@ -28,8 +28,11 @@ try {
     }
 
     # Run the ingest (no --leagues = all current leagues; add --leagues 39,140 to restrict).
+    # --build rebuilds the image from source before running so this Windows trigger
+    # can never drift onto a stale image either (anti-drift, task 0008 — mirrors the
+    # compose scheduler cron).
     & docker compose -f "$projectDir\docker-compose.yml" `
-        run --rm --profile cli ingestor `
+        run --build --rm --profile cli ingestor `
         ingest --season 2025 2>&1 |
         Out-File -Append $logFile
 
