@@ -208,23 +208,30 @@ populated in the sources DB) — which gates the matcher's live smoke
       coordinator addendum), NOT rate-limiting or shared-key contention; D4 held
       correctly throughout (bad runs left the prior snapshot intact). Spec:
       `specs/coordinator/tasks/0007-scheduler-redeploy.md`.
-- [~] **0008** — Daily scheduling: **anti-drift redeploy** + ops runbook.
-      Decision = **rebuild-on-cron** (build before run) — the minimal correct fix
-      for this single-host, source-mounted compose setup (registry-pull / CI-CD
-      rejected as heavier). Makes the `0 2 * * *` cron self-currenting so it can
-      never silently run a stale `:latest` again (root cause of F2/0007). Adds
-      `docs/OPS.md` tracking the daily run + the **subscription expiry 2026-08-06**
-      so the next lapse is an anticipated calendar event. Ingestion code
-      unchanged. Depends on 0007. Spec:
+- [x] **0008** — Daily scheduling: **anti-drift redeploy** + ops runbook.
+      Verifier PASS `f188c9b`. Decision **rebuild-on-cron** (`run --build`) landed
+      in both trigger paths (`docker-compose.yml`, `scripts/run-ingest.ps1`); an
+      autonomous crond-fired run rebuilt `:latest` from source (image advanced to
+      `552d4a2874cb`) **before** running, reached `succeeded`, and refreshed
+      `apifootball_events` to 43,123 rows — drift can no longer recur. `docs/OPS.md`
+      tracks the daily run + the **2026-08-06 subscription expiry**. Spec:
       `specs/coordinator/tasks/0008-daily-scheduling.md`.
-- [ ] **0006** — Fix timing-flaky `test_heartbeat_ticks_at_interval` (0003
-      finding V1): ≥3 ticks in a 180 ms window at a 50 ms interval overshoots
-      under CPU saturation (Windows ~15 ms timer). Make it tolerant (fake clock /
-      lower threshold / retry). Green-baseline hygiene. Sequence after 0008.
+- [~] **0006** — De-flake `test_heartbeat_ticks_at_interval` (0003/0005 finding
+      V1): fixed `time.sleep(0.18)` + exact `>=3` assert races the ~15 ms Windows
+      timer / CPU load. Decision = **bounded poll** (wait up to a generous
+      deadline for the tick count, test-only — no injectable-clock source change).
+      Green-baseline hygiene every future `make test` depends on. Spec:
+      `specs/coordinator/tasks/0006-heartbeat-test-flake.md`.
 - [ ] **0009** — Persist per-minute `x-ratelimit-*-remaining` headers (0005
       finding 1): the client receives but discards them. **Backlog observability
       for FUTURE diagnosis** — explicitly NOT needed to explain the 0007 incident,
       which is now traced to a subscription lapse (not throttling). Small change.
+      _(Bundle-in candidates from 0008's verifier, both low-priority: (a)
+      `scripts/run-ingest.ps1` passes `--profile cli` as a `run` argument rather
+      than the top-level `docker compose --profile cli run` flag — a latent bug on
+      the Windows trigger path, which is not the primary trigger; (b) `docs/OPS.md`
+      §3 hard-codes container names, so a rename would silently break the runbook —
+      cosmetic.)_
 - [ ] **0010 — DEFERRED (D4 stays locked)** — Partial-tolerance /
       success-with-warnings policy. The transient failures that motivated it
       (0007's 429/`failed` fires) were a **subscription lapse**, not a genuine
@@ -341,3 +348,15 @@ populated in the sources DB) — which gates the matcher's live smoke
   (daily scheduling): decision **rebuild-on-cron** to kill the anti-drift flaw
   (scheduled path never rebuilds `:latest`) + `docs/OPS.md` runbook tracking the
   2026-08-06 expiry so the next lapse is anticipated.
+- _(2026-07-07)_ — **0008** done (verifier PASS, `f188c9b`): daily scheduling is
+  now **self-currenting**. `run --build` in both trigger paths
+  (`docker-compose.yml` cron + `scripts/run-ingest.ps1`) means the `0 2 * * *` run
+  rebuilds `:latest` from source before executing — an autonomous crond-fired run
+  rebuilt the image (→ `552d4a2874cb`), reached `succeeded`, and refreshed
+  `apifootball_events` to 43,123 rows, so F2's stale-image drift **cannot recur**.
+  `docs/OPS.md` runbook records the daily run + the 2026-08-06 subscription expiry.
+  **The Bronze daily pipeline is fully operational** (build → ingest → projection,
+  automated, verified). Opened **0006** (de-flake the heartbeat timing test via a
+  bounded poll) — the last green-baseline hygiene item; two low-priority 0008
+  verifier findings (Windows-path `--profile` placement; OPS.md hard-coded
+  container names) parked as bundle-in candidates for 0009.
