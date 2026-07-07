@@ -11,7 +11,7 @@ Status key: `[ ]` not started · `[~]` in progress · `[x]` done
 
 ---
 
-## Phase 1 — Bronze Layer (CURRENT SCOPE)
+## Phase 1 — Bronze Layer (✅ COMPLETE & STABLE — 2026-07-07)
 
 Raw, append-only ingestion. Two-phase fetch strategy:
 - Phase A: league-grain (leagues + fixtures-by-league for all ~1,500 leagues)
@@ -139,7 +139,7 @@ Silver and Gold are explicitly OUT OF SCOPE until this phase is complete.
 
 ---
 
-## Phase 1.5 — API-Football projection (CURRENT SCOPE)
+## Phase 1.5 — API-Football projection (✅ COMPLETE — 2026-07-05)
 
 Governance scaffolding (`DECISIONS.md`, `LOG.md`, `specs/`, `PROMPTS.md`,
 `CLAUDE.md` charter amendment + three-agent workflow) was set up as a
@@ -165,7 +165,7 @@ reads as an event source (DECISIONS D2–D6). Step 2 (the matcher-side source) i
 
 ---
 
-## Phase 1.6 — Live smoke: exit criteria + projection E2E (CURRENT SCOPE)
+## Phase 1.6 — Live smoke: exit criteria + projection E2E (✅ COMPLETE — 2026-07-07)
 
 All hermetic work is green (1.1–1.10). What has never happened is a run against
 the **real API**. This phase proves the Phase 1 exit criteria live and, in the
@@ -216,11 +216,11 @@ populated in the sources DB) — which gates the matcher's live smoke
       `apifootball_events` to 43,123 rows — drift can no longer recur. `docs/OPS.md`
       tracks the daily run + the **2026-08-06 subscription expiry**. Spec:
       `specs/coordinator/tasks/0008-daily-scheduling.md`.
-- [~] **0006** — De-flake `test_heartbeat_ticks_at_interval` (0003/0005 finding
-      V1): fixed `time.sleep(0.18)` + exact `>=3` assert races the ~15 ms Windows
-      timer / CPU load. Decision = **bounded poll** (wait up to a generous
-      deadline for the tick count, test-only — no injectable-clock source change).
-      Green-baseline hygiene every future `make test` depends on. Spec:
+- [x] **0006** — De-flake `test_heartbeat_ticks_at_interval` (0003/0005 finding
+      V1). Verifier PASS `e322698`. Replaced the fixed `time.sleep` + exact-count
+      race with a **bounded poll** (`_poll_until`, 2 s deadline); test-only,
+      `heartbeat.py` byte-identical; demonstrated 26/26 clean runs incl. under
+      4-process CPU load. Spec:
       `specs/coordinator/tasks/0006-heartbeat-test-flake.md`.
 - [ ] **0009** — Persist per-minute `x-ratelimit-*-remaining` headers (0005
       finding 1): the client receives but discards them. **Backlog observability
@@ -239,10 +239,27 @@ populated in the sources DB) — which gates the matcher's live smoke
       tolerate a billing event. The D4 all-or-nothing gate behaved correctly
       throughout 0007 (bad runs preserved the prior snapshot). **Revisit only if a
       healthy-subscription full run shows a real, recurring partial rate.**
+- [ ] **0011** — Test-gate hardening (0006 verifier observation): stand up an
+      **ephemeral Postgres** for `make test` so the ~27 DB-backed tests
+      (`test_projection.py` et al.) run in the standard gate instead of skipping
+      when no local DB is present — the DB-integration coverage currently only
+      runs when a container happens to be up. Backlog hygiene, no product impact.
+
+**Backlog note (2026-07-07):** 0009 + 0011 are optional hygiene and 0010 is
+deferred — none is on a critical path. Pick them up when this repo next has an
+active arc.
 
 ---
 
-## Phase 2 — Silver Layer (FUTURE — do not start yet)
+## Phase 2 — Silver Layer (GATED — authorized only in a platform planning round)
+
+**Why gated, not just "next" (2026-07-07):** Silver is the labels / feature store
+for a **future quant/ML phase that has no consumer today**. Because bronze is
+fully replayable (`docs/REBUILD.md`), deferring Silver costs nothing — it can be
+built from the accumulated raw history whenever a consumer exists. It is
+therefore **not** a rolling next-task; it will be authorized in a platform-level
+planning round, not picked up automatically off this list.
+
 - [ ] Flatten/parse bronze JSONB into typed relational tables
 - [ ] Extract embedded data from rich fixture response (lineups, events,
       player stats, fixture stats) into separate silver tables
@@ -360,3 +377,17 @@ populated in the sources DB) — which gates the matcher's live smoke
   bounded poll) — the last green-baseline hygiene item; two low-priority 0008
   verifier findings (Windows-path `--profile` placement; OPS.md hard-coded
   container names) parked as bundle-in candidates for 0009.
+- _(2026-07-07)_ — **0006** done (verifier PASS, `e322698`): heartbeat timing
+  test de-flaked via a bounded poll (26/26 clean, incl. under CPU load);
+  `heartbeat.py` untouched. Green-baseline hygiene closed.
+- _(2026-07-07)_ — **✅ PHASE 1 COMPLETE & STABLE — `apifootball-integration`
+  branch merge-ready.** Bronze is built, hermetically tested, live-proven at full
+  catalogue (0005: 1,231 leagues `succeeded`), and running as a self-currenting
+  automated daily job (0008: rebuild-on-cron) whose `apifootball_events`
+  projection feeds the matcher (D2–D6). Exit criteria all met; lint/type-check/
+  tests green. Remaining items are optional backlog (**0009** x-ratelimit logging,
+  **0011** ephemeral-Postgres test gate) or explicitly deferred (**0010**
+  partial-tolerance, D4 locked); **Phase 2 Silver stays gated** — authorized only
+  in a platform planning round (no consumer today; bronze replayability makes
+  deferral free). No rolling next-task; the three-agent loop pauses here until a
+  new arc is authorized.
