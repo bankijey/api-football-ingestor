@@ -1,8 +1,11 @@
 """Postgres connection pool — single entrypoint for all DB access.
 
-We use psycopg2's SimpleConnectionPool because the ingestor is sync +
-ThreadPoolExecutor. Each worker `with pool.connection() as conn:` borrows a
-connection for the duration of one unit of work (a fetch, a write).
+ThreadedConnectionPool is used (not SimpleConnectionPool): the ingestor uses
+sync + ThreadPoolExecutor, so concurrent getconn/putconn calls happen all
+the time. SimpleConnectionPool's internal dicts (_used / _rused) are not
+guarded by a lock, which under threads can corrupt the pool's bookkeeping
+and surface as `PoolError: trying to put unkeyed connection`. The threaded
+variant wraps every operation in a threading.Lock.
 
 DO NOT instantiate raw psycopg2 connections elsewhere — go through the pool.
 """
@@ -13,14 +16,14 @@ from contextlib import contextmanager
 from typing import Any
 
 from psycopg2.extensions import connection as PgConnection
-from psycopg2.pool import SimpleConnectionPool
+from psycopg2.pool import ThreadedConnectionPool
 
 from ..config import Settings
 
 
 class ConnectionPool:
     def __init__(self, dsn: str, *, minconn: int = 1, maxconn: int = 16) -> None:
-        self._pool = SimpleConnectionPool(minconn, maxconn, dsn=dsn)
+        self._pool = ThreadedConnectionPool(minconn, maxconn, dsn=dsn)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ConnectionPool:

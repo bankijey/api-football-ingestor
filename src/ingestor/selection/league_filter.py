@@ -22,13 +22,21 @@ def select_leagues(
     leagues_payload: dict[str, Any],
     *,
     subset: Iterable[int] | None = None,
+    seasons: Iterable[int] | None = None,
 ) -> list[LeagueWork]:
-    """Return one LeagueWork per (league, current season).
+    """Return one LeagueWork per (league, season).
 
-    Skips: malformed entries; non-current seasons; leagues not in `subset` when
-    `subset` is non-empty.
+    Season filter:
+      * If `seasons` is given, keep every league-season pair whose year is in
+        the set (used for historical backfills like 2019..2022).
+      * Otherwise keep only the season the API marks `current=true`
+        (default, used by the daily run).
+
+    Skips: malformed entries; leagues not in `subset` when `subset` is set;
+    seasons not in `seasons` when that filter is active.
     """
     subset_set: set[int] | None = set(subset) if subset else None
+    seasons_set: set[int] | None = set(seasons) if seasons else None
     out: list[LeagueWork] = []
     for item in leagues_payload.get("response", []) or []:
         league = item.get("league") or {}
@@ -39,10 +47,13 @@ def select_leagues(
         if subset_set is not None and lid_int not in subset_set:
             continue
         for season in item.get("seasons") or []:
-            if not season.get("current"):
-                continue
             year = season.get("year")
             if year is None:
+                continue
+            if seasons_set is not None:
+                if int(year) not in seasons_set:
+                    continue
+            elif not season.get("current"):
                 continue
             out.append(LeagueWork(
                 league_id=lid_int,

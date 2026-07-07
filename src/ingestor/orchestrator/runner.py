@@ -43,7 +43,9 @@ class RunResult:
 @dataclass
 class RunArgs:
     """Subset of inputs we want recorded on `ingestion_runs.args`."""
-    season_override: int | None = None
+    # When set, replaces the default `current=true` season filter in
+    # select_leagues. Use [2019,2020,2021,2022] to backfill historical seasons.
+    seasons_override: list[int] | None = None
     league_subset_override: list[int] | None = None
     lookback_days_override: int | None = None
     resume_run_id: UUID | None = None
@@ -106,6 +108,12 @@ def run_ingestion(
             checkpoints.finish_run(run_id, status=status, counters=counters)
             _log.info("run.done", status=status, counters=counters)
 
+            # Final step of a SUCCESSFUL run: rebuild the apifootball_events
+            # projection in the sources DB (D4). Gated on 'succeeded' so
+            # partial/failed runs leave the prior snapshot untouched.
+            if _should_project(status, settings):
+                _project_events(settings, pool)
+
             return RunResult(
                 run_id=run_id, status=status,
                 phase_a=phase_a, phase_b=phase_b,
@@ -138,8 +146,16 @@ def _execute_phases(
     with pool.connection() as conn:
         leagues_outcome = fetch_leagues(client, conn, run_id=run_id)
     subset = args.league_subset_override or settings.league_subset or None
-    works = select_leagues(leagues_outcome.payload, subset=subset)
-    _log.info("run.leagues_selected", count=len(works))
+    works = select_leagues(
+        leagues_outcome.payload,
+        subset=subset,
+        seasons=args.seasons_override,
+    )
+    _log.info(
+        "run.leagues_selected",
+        count=len(works),
+        seasons_override=args.seasons_override,
+    )
 
     # Phase A.
     phase_a = run_phase_a(
@@ -179,3 +195,17 @@ def _terminal_status(a: PhaseAResult, b: PhaseBResult) -> str:
     if a.counters.failed == 0 and b.counters.failed == 0:
         return "succeeded"
     return "partial"
+
+
+def _should_project(status: str, settings: Settings) -> bool:
+    """Gate for the projection hook: only on a succeeded run, and only when a
+    sources DB is configured (empty MATCHER_DB_DSN disables it)."""
+    return status == "succeeded" and bool(settings.matcher_db_dsn)
+
+
+def _project_events(settings: Settings, bronze_pool: ConnectionPool) -> None:
+    from ..projection import build_projection
+
+    with ConnectionPool(settings.matcher_db_dsn, minconn=1, maxconn=2) as matcher_pool:
+        n = build_projection(bronze_pool=bronze_pool, matcher_pool=matcher_pool)
+    _log.info("run.projection_written", rows=n)

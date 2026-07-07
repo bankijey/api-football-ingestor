@@ -68,3 +68,18 @@ def test_get_settings_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     a = get_settings()
     b = get_settings()
     assert a is b
+
+
+def test_matcher_dsn_dialect_normalized() -> None:
+    def _dsn(v: str) -> str:
+        return Settings(  # type: ignore[call-arg]
+            _env_file=None, apifootball_key="k",         # type: ignore[arg-type]
+            matcher_db_dsn=v,
+        ).matcher_db_dsn
+
+    # SQLAlchemy `+psycopg2` dialect suffix stripped for raw psycopg2 (F1/D5).
+    assert _dsn("postgresql+psycopg2://u:p@h:5432/db") == "postgresql://u:p@h:5432/db"
+    # A bare psycopg2 DSN is unchanged (idempotent).
+    assert _dsn("postgresql://u:p@h:5432/db") == "postgresql://u:p@h:5432/db"
+    # Unconfigured stays empty — projection stays skipped (D5).
+    assert _dsn("") == ""

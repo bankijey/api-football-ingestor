@@ -71,6 +71,8 @@ make ingest ARGS="--resume <run_id>"
 
 Tear down with `make down` (keeps data) or `make clean` (drops the volume).
 
+**Running in production?** The daily schedule, subscription-renewal calendar, and a verify-a-run checklist live in the operations runbook: [`docs/OPS.md`](docs/OPS.md).
+
 ## Development
 
 ```bash

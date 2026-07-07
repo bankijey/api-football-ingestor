@@ -6,6 +6,12 @@ This repo is built incrementally, ONE layer at a time. Current scope is
 **BRONZE only** — raw, append-only ingestion. Silver and Gold are explicitly
 out of scope until Bronze is complete and stable.
 
+**Scope amendment (2026-07-05, `DECISIONS.md` D2):** ONE bounded exception to
+bronze-only — a single serving projection, `apifootball_events`, materialized
+from `bronze_fixtures` so the matcher can read API-Football as an event source.
+It is field-extraction, not a Silver layer: it does not parse or reshape bronze,
+and it is limited to this one table. Everything else stays bronze-only.
+
 ## What (Bronze scope)
 
 ### Endpoint strategy (important — read carefully)
@@ -77,9 +83,20 @@ transformations, hardcoded keys, no error isolation).
 - Each fixture's rich-data fetch is failure-isolated independently.
 - HTTP 200 with non-empty `errors` field = treated as failure.
 
+## Read order (every session, every time)
+1. This file (`CLAUDE.md`) — what / why / hard rules
+2. `DECISIONS.md` — locked design decisions. Do not relitigate.
+3. `docs/ROADMAP.md` — what's done and what's next
+4. The current task spec under `specs/coordinator/tasks/`
+
 ## Working style
-- Work in small, reviewable steps. After each step, stop and summarise what
-  changed and what's next, so work can pause and resume cleanly.
-- Update the checkbox and progress log in docs/ROADMAP.md at the end of each step.
+- Work in **one task per cycle** (coordinator → implementor → verifier),
+  adopted 2026-07-05 (`DECISIONS.md` D1). Implementor does not self-grade;
+  verifier does not implement; a failed task becomes a coordinator follow-up,
+  not an implementor self-fix.
+- Coordinator writes tasks under `specs/coordinator/tasks/`; verifier writes
+  reports under `specs/verifier/reports/`.
+- After each task: tick the box + add a one-line progress-log entry (Berlin
+  date) in `docs/ROADMAP.md`, and append a `LOG.md` line.
 - Prefer config over hardcoding (rate limits, league list, season, retries,
   lookback window, fixture statuses).
