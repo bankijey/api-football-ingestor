@@ -69,7 +69,7 @@ diagnosed at 02:00.
 
 | Property | Value |
 |----------|-------|
-| **Account** | `bankianthony@gmail.com` |
+| **Account** | the account owner (see API-Football dashboard) |
 | **Plan** | `Pro` (was `Ultra` until 2026-08-06) |
 | **Renewed** | ~2026-08-26 |
 | **Expiry** | **2026-09-26** (from the `/status` probe, 2026-09-21) |

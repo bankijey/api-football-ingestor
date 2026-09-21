@@ -328,7 +328,7 @@ the next code change.
 
 ```
 $ curl -s "$BASE/status" -H "x-rapidapi-key: <redacted>" -H "x-rapidapi-host: v3.football.api-sports.io"
-account: bankianthony@gmail.com
+account: <account owner>
 plan: {'plan': 'Ultra', 'end': '2026-08-06...', 'active': True}
 requests today: {'current': 9144, 'limit_day': 75000}     # ~12% used, ~65,856 free
 ```
