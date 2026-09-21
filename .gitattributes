@@ -1,0 +1,3 @@
+# Never line-ending-convert generated binaries (reportlab PDFs look like text).
+*.pdf binary
+*.png binary
