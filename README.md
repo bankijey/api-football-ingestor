@@ -92,6 +92,21 @@ Pure tests (HTTP, config, logging, selection logic) run without Postgres and aut
 - **Ruff** for linting + import sorting
 - **All Phase 1 ROADMAP boxes ticked** (see `docs/ROADMAP.md`)
 
+## In production
+
+The ingestor has run on a daily schedule since June 2026. Every run is recorded in `ingestion_runs` and every call it gave up on in `dead_letter`, so its operating history can be plotted directly from the database:
+
+![Scheduled run outcome by day](docs/img/run-calendar.png)
+
+![Estimated API calls per day against the daily limit](docs/img/api-calls.png)
+
+The failures have clear causes, and the run history is what found them:
+- **Whole-run failures** come from the API's daily quota. The run was scheduled at 02:00 Berlin, which is 00:00 UTC in summer, exactly when the quota resets. Manual backfills that ran past midnight also used up the next day's quota. The schedule moved to 07:00, the limiter's `DAILY_QUOTA` now matches the plan, and large backfills are to be split into chunks that each fit one day's quota.
+- **Partial runs** come from per-minute rate limiting. Failure isolation contains them to a handful of dead-lettered leagues or fixtures, and the next run fetches those again.
+- **Days with no run** mean the host was down; runs can be resumed and date gaps backfilled (`--resume`, `--from/--to`).
+
+The full analysis is in [`docs/ingestion-failure-report.pdf`](docs/ingestion-failure-report.pdf). It is generated from the live database by [`docs/_build_failure_report.py`](docs/_build_failure_report.py), which also redraws these charts.
+
 ## Tech stack
 
 Python 3.12 · `httpx` (sync) · `tenacity` (retries + jitter) · `pydantic` + `pydantic-settings` · `structlog` · `psycopg2` · `concurrent.futures.ThreadPoolExecutor` · Docker / Compose · Make

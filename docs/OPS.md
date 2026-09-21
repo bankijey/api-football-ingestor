@@ -15,7 +15,7 @@ to read when a 02:00 run looks wrong.
 | Property | Value |
 |----------|-------|
 | **What fires** | The compose `scheduler` service — a long-lived `docker:27-cli` container (`ingestor-scheduler`) running `crond`. |
-| **Schedule** | `0 2 * * *` — 02:00 daily, in the container's `TZ` (`Europe/Berlin` on this host; the crontab minute/hour is local time). |
+| **Schedule** | `0 7 * * *` — 07:00 daily (moved from 02:00 on 2026-09-21: 02:00 CEST = 00:00 UTC, the daily-quota rollover; see `docs/ingestion-failure-report.pdf`), in the container's `TZ` (`Europe/Berlin` on this host; the crontab minute/hour is local time). |
 | **Command** | `docker compose -f /workspace/docker-compose.yml run --build --rm ingestor ingest >> /var/log/ingest.log 2>&1` |
 | **Defined in** | [`docker-compose.yml`](../docker-compose.yml) — `scheduler.command` writes this crontab at container start. |
 
@@ -70,12 +70,12 @@ diagnosed at 02:00.
 | Property | Value |
 |----------|-------|
 | **Account** | `bankianthony@gmail.com` |
-| **Plan** | `Ultra` |
-| **Renewed** | 2026-07-06 |
-| **Expiry** | **2026-08-06** (from the `/status` probe) |
-| **Daily quota** | 75,000 requests/day |
+| **Plan** | `Pro` (was `Ultra` until 2026-08-06) |
+| **Renewed** | ~2026-08-26 |
+| **Expiry** | **2026-09-26** (from the `/status` probe, 2026-09-21) |
+| **Daily quota** | 7,500 requests/day (`.env` DAILY_QUOTA still 75000 — must be lowered) |
 
-### ⏰ Reminder: renew before **2026-08-06**
+### ⏰ Reminder: renew before **2026-09-26**
 Set a calendar reminder a few days ahead. The plan `end` date is also readable
 live from `/status` (see below) — it does not consume request quota.
 

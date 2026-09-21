@@ -127,7 +127,7 @@ def _on_page(canvas, doc):
     # Footer left: project label
     canvas.drawString(20 * mm, 12 * mm, "API-Football Ingestor · Operator Reference")
     # Footer center: date
-    canvas.drawCentredString(A4[0] / 2, 12 * mm, "June 2026")
+    canvas.drawCentredString(A4[0] / 2, 12 * mm, "September 2026")
     # Footer right: page number
     canvas.drawRightString(A4[0] - 20 * mm, 12 * mm, f"Page {doc.page}")
     canvas.restoreState()
@@ -166,7 +166,7 @@ def build():
         styles["Body"]))
     story.append(Paragraph(
         "• <b>ingestor-scheduler</b> &mdash; a small cron container that triggers the "
-        "nightly run at 02:00 Europe/Berlin",
+        "daily run at 07:00 Europe/Berlin",
         styles["Body"]))
     story.append(Paragraph(
         "• <b>ingestor</b> &mdash; the actual ingestor (built on demand; profile <font face='Courier'>cli</font>)",
@@ -215,6 +215,23 @@ def build():
              "Apply schema migrations only"),
         ],
         col_widths=[100 * mm, 70 * mm]))
+
+    # ---- 3a. Resuming a run ----
+    story.append(Paragraph("<b>Resuming an interrupted run</b>", styles["Body"]))
+    story.append(Paragraph(
+        "Pass the <font face='Courier'>run_id</font> from "
+        "<font face='Courier'>ingestion_runs</font>. Work that already succeeded "
+        "is skipped; failed or unfinished tasks are retried. The original flags are "
+        "<b>not</b> reloaded, so repeat them (e.g. <font face='Courier'>--from/--to</font>, "
+        "<font face='Courier'>--leagues</font>). Example:",
+        styles["Body"]))
+    story.append(_code(styles,
+        "docker compose run --rm ingestor ingest --resume f0743395-eba9-4418-9772-25d1dc5c3da1"))
+    story.append(Paragraph("Look up the original flags for that run first:", styles["Body"]))
+    story.append(_code(styles,
+        "SELECT status, args\n"
+        "FROM ingestion_runs\n"
+        "WHERE run_id = 'f0743395-eba9-4418-9772-25d1dc5c3da1';"))
 
     # ---- 4. Historical backfills ----
     story.append(PageBreak())
@@ -269,7 +286,7 @@ def build():
             ("docker exec ingestor-scheduler date",
              "Confirm scheduler timezone (should show CEST/CET)"),
             ("docker exec ingestor-scheduler tail -f /var/log/ingest.log",
-             "Watch nightly run logs in real time"),
+             "Watch daily run logs in real time"),
             ("docker exec ingestor-scheduler tail -n 500 /var/log/ingest.log",
              "Last 500 log lines"),
             ("docker exec -it ingestor-postgres psql -U ingestor -d ingestor",
@@ -280,7 +297,7 @@ def build():
     # ---- 7. Manual trigger ----
     story.append(Paragraph("7. Manual scheduler trigger", styles["H1"]))
     story.append(Paragraph(
-        "Trigger the same run the cron will fire at 2 a.m., immediately:",
+        "Trigger the same run the cron will fire at 07:00, immediately:",
         styles["Body"]))
     story.append(_code(styles,
         'docker exec ingestor-scheduler sh -c '
@@ -342,7 +359,7 @@ def build():
             ("RATE_LIMIT_PER_MIN", "240",
              "Calls per minute (kept under the 300 plan cap as safety margin)"),
             ("RATE_LIMIT_WINDOW_SEC", "65", "Sliding window length"),
-            ("DAILY_QUOTA", "75000", "Daily call cap"),
+            ("DAILY_QUOTA", "7500", "Daily call cap. Must match the plan (Pro = 7,500; check /status)"),
             ("THREAD_POOL_SIZE", "8", "Parallel workers"),
             ("LOOKBACK_DAYS", "2",
              "Default rolling Phase-B window (now 2 for daily runs)"),
@@ -352,8 +369,52 @@ def build():
         ],
         col_widths=[55 * mm, 30 * mm, 85 * mm]))
 
-    # ---- 10. Glossary ----
-    story.append(Paragraph("10. Glossary", styles["H1"]))
+    # ---- 10. Failure report ----
+    story.append(PageBreak())
+    story.append(Paragraph("10. Ingestion failure report", styles["H1"]))
+    story.append(Paragraph(
+        "<font face='Courier'>docs\\ingestion-failure-report.pdf</font> summarises every run: "
+        "outcome by day, API calls against the daily limit, dead letters by cause, "
+        "and days with no scheduled run. The builder reads the live database, so "
+        "regenerate the report after any bad night to get current numbers. Run these "
+        "from PowerShell on the host (not inside Docker). Postgres must be up.",
+        styles["Body"]))
+    story.append(_make_table(styles,
+        ["Command", "What it does"],
+        [
+            (".venv\\Scripts\\python -m pip install reportlab matplotlib tzdata",
+             "One-time: install the PDF and chart libraries into the project venv"),
+            ("docker compose up -d postgres",
+             "Make sure the database is reachable on POSTGRES_HOST_PORT"),
+            (".venv\\Scripts\\python docs\\_build_failure_report.py",
+             "Rebuild docs\\ingestion-failure-report.pdf from live data"),
+            (".venv\\Scripts\\python docs\\_build_pdf.py",
+             "Rebuild this manual (docs\\ingestor-commands.pdf)"),
+            ("start docs\\ingestion-failure-report.pdf",
+             "Open the report in the default PDF viewer"),
+        ],
+        col_widths=[95 * mm, 75 * mm]))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        "<b>Before recreating the scheduler, save its log.</b> The root cause of a crashed "
+        "run (e.g. the daily-limit message) is only in <font face='Courier'>/var/log/ingest.log</font> "
+        "inside the scheduler container. <font face='Courier'>--force-recreate</font> wipes it.",
+        styles["Body"]))
+    story.append(_code(styles,
+        "docker cp ingestor-scheduler:/var/log/ingest.log ingest-backup.log"))
+    story.append(Paragraph("<b>Why did a run crash?</b>", styles["Body"]))
+    story.append(_code(styles,
+        "docker exec ingestor-scheduler sh -c \"grep run.crashed /var/log/ingest.log | tail -n 3\""))
+    story.append(Paragraph("<b>Plan, expiry and today's usage (uses no quota)</b>", styles["Body"]))
+    story.append(_code(styles,
+        "docker exec ingestor-scheduler sh -c 'wget -qO- "
+        "--header=\"x-rapidapi-key: $APIFOOTBALL_KEY\" "
+        "--header=\"x-rapidapi-host: v3.football.api-sports.io\" "
+        "https://v3.football.api-sports.io/status'"))
+
+    # ---- 11. Glossary ----
+    story.append(PageBreak())
+    story.append(Paragraph("11. Glossary", styles["H1"]))
     story.append(_make_table(styles,
         ["Term", "Plain-English meaning"],
         [
@@ -370,7 +431,7 @@ def build():
             ("Retry-After", "A header telling us exactly how long to wait"),
             ("Idempotent",
              "Running twice gives the same result as once &mdash; safe to resume"),
-            ("Cron", "A scheduler. \"0 2 * * *\" = every day at 02:00"),
+            ("Cron", "A scheduler. \"0 7 * * *\" = every day at 07:00"),
             ("DSN", "Database connection string"),
             ("Hash dedup",
              "Fingerprint the response, skip storing if it matches last fingerprint"),
