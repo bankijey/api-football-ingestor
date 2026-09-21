@@ -9,7 +9,7 @@ missed scheduled days, the three charts, the current status of every run named
 in the analysis, and any failed/partial run since the analysis cutoff.
 Also writes docs/img/run-calendar.png and docs/img/api-calls.png (used by README).
 
-Static: the root-cause analysis of 2026-09-21. It was derived from the scheduler's
+Static: the context notes of the 2026-09-21 analysis (RESUMED_AFTER_CRASH, CONTEXT). They came from the scheduler's
 /var/log/ingest.log (run.crashed events) and a /status probe, and that log is
 wiped whenever the scheduler container is recreated.
 
@@ -58,6 +58,27 @@ SCHEDULE_CHANGE = date(2026, 9, 22)
 FIRST_SCHEDULED_DAY = date(2026, 6, 8)
 # Runs after this instant are listed in "Runs since the analysis".
 ANALYSIS_CUTOFF = datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN)
+
+# Crashed runs that were later resumed to success: finish_run overwrote their
+# stored error, so the cause comes from the scheduler log (analysis 2026-09-21).
+RESUMED_AFTER_CRASH = {
+    "6e8e95b2": "Daily quota exhausted",
+    "28e903ea": "Daily quota exhausted",
+    "57c6e271": "Daily quota exhausted",
+}
+# Human context for notable runs (analysis 2026-09-21).
+CONTEXT = {
+    "6690374b": "Manual backfill, killed after ~20 h; 8 checkpoints left pending",
+    "d3f8301c": "Start of 8 nights of DNS failures on the host (06-23..06-30)",
+    "006702be": "Deliberate invalid-key test (task 0003 smoke)",
+    "851d7576": "Quota spent by 5 test runs that day (task 0007)",
+    "6ff51833": "Subscription expired 08-06",
+    "272ad182": "Subscription lapsed; key on Free plan",
+    "41ff3688": "Backfill 1e184047 running across midnight",
+    "74b4af46": "Backfill 1e184047 still running",
+    "80a18644": "After a 5,652-call day",
+    "6e8e95b2": "Backfill f0743395 running across midnight",
+}
 
 # --- chart tokens (dataviz reference palette, light mode) ---
 SURFACE = "#fcfcfb"
@@ -145,6 +166,13 @@ def _cause(error_class: str, status: int | None, msg: str) -> str:
     if error_class == "ConnectError" or "name resolution" in m or "hostname" in m:
         return "Network (DNS)"
     return f"Other ({error_class})"
+
+
+def _run_cause(err: str) -> str:
+    """Classify the exception string a crashed run stored in counters.error."""
+    if "client error 403" in err:
+        return "HTTP 403 (key rejected)"
+    return _cause(err.split(":", 1)[0], None, err)
 
 
 def load() -> dict:
@@ -427,9 +455,10 @@ def build() -> None:
     # ---- Findings (static analysis) ----
     story.append(B("<b>Findings (analysis of 2026-09-21)</b>"))
     for t in [
-        "<b>Daily quota is the #1 cause of total failures.</b> Every scheduled run "
-        "that failed from 2026-08-07 to 2026-09-21 died within 60&nbsp;s at the "
-        "<font face='Courier'>/leagues</font> bootstrap call. The API answered: "
+        "<b>Two causes explain every whole-run failure.</b> In late June, 8 nights in a "
+        "row failed on <b>DNS</b>: the host could not resolve the API hostname at 02:00. "
+        "From August on, every scheduled failure was the <b>daily quota</b>: the run died "
+        "within 60&nbsp;s at the <font face='Courier'>/leagues</font> bootstrap call with "
         "<i>&quot;You have reached the request limit for the day&quot;</i>.",
         "<b>The configured quota was 10&times; too high.</b> <font face='Courier'>/status</font> "
         "reported plan <b>Pro, limit_day = 7,500</b>, while <font face='Courier'>.env</font> "
@@ -468,34 +497,31 @@ def build() -> None:
         "Logging <font face='Courier'>x-ratelimit-requests-remaining</font> (task 0009) "
         "would settle it."))
 
-    # ---- 3. Whole-run failures (static causes, live status) ----
+    # ---- 3. Whole-run failures (live causes + static context) ----
     story.append(H("3. Whole-run failures"))
     story.append(B(
-        "Causes come from the scheduler log's <font face='Courier'>run.crashed</font> "
-        "events (analysis of 2026-09-21). <b>Status now</b> is live: a resumed run "
-        "shows succeeded. Times are Berlin time."))
-    rows = [
-        ("d3f8301c..7ddbf576", "06-23..06-30 (8 runs)",
-         "Log not retained; same fingerprint as quota/lapse (&lt;1 min, 0 dead letters)"),
-        ("6690374b", "06-10 13:53", "Manual backfill; aborted after ~20 h, 8 checkpoints pending"),
-        ("006702be", "07-06 11:58", "Manual smoke test (task 0003)"),
-        ("851d7576", "07-06 21:27", "Daily quota spent by 5 test runs that day (task 0007)"),
-        ("a1144578", "07-10 02:00", "Network: DNS lookup failed (ConnectError)"),
-        ("6ff51833", "08-07 02:00", "Daily limit; subscription expired 08-06"),
-        ("272ad182", "08-09 02:00", "Daily limit; subscription lapsed"),
-        ("41ff3688", "08-27 02:01", "Daily limit; backfill 1e184047 running across midnight"),
-        ("74b4af46", "08-28 02:00", "Daily limit; backfill 1e184047 still running"),
-        ("ed49dce2", "08-29 02:00", "Daily limit"),
-        ("80a18644", "09-08 02:00", "Daily limit, after a 5,652-call day"),
-        ("6e8e95b2", "09-16 02:00", "Daily limit; backfill f0743395 running across midnight"),
-        ("28e903ea", "09-17 02:00", "Daily limit"),
-        ("fb8b6227", "09-18 02:00", "Daily limit"),
-        ("57c6e271", "09-21 02:00", "Daily limit"),
-    ]
-    story.append(_make_table(s, ["Run", "Started", "Cause", "Status now"], [
-        (rid, when, cause, status_of.get(rid[:8], "failed"))
-        for rid, when, cause in rows
-    ], col_widths=[30 * mm, 32 * mm, 86 * mm, 22 * mm]))
+        "Each crashed run stores its exception in <font face='Courier'>ingestion_runs."
+        "counters-&gt;'error'</font>, so causes come live from the database. A run that "
+        "was later resumed to success has its error overwritten. Those runs are listed "
+        "with the cause taken from the scheduler log. <i>Context</i> is the 2026-09-21 "
+        "analysis. Times are Berlin time."))
+    by_id = {r["id"][:8]: r for r in runs}
+    rows = []
+    for r in runs:
+        err = (r["counters"] or {}).get("error")
+        if r["status"] != "failed" and r["id"][:8] not in RESUMED_AFTER_CRASH:
+            continue
+        cause = (_run_cause(err) if err
+                 else RESUMED_AFTER_CRASH.get(r["id"][:8], "No error recorded"))
+        rows.append((r["id"][:8], f"{r['started']:%m-%d %H:%M}", cause,
+                     CONTEXT.get(r["id"][:8], ""), r["status"]))
+    story.append(_make_table(s, ["Run", "Started", "Cause", "Context", "Status now"], rows,
+                             col_widths=[20 * mm, 22 * mm, 38 * mm, 70 * mm, 20 * mm]))
+    causes = Counter(row[2] for row in rows)
+    story.append(Spacer(1, 4))
+    story.append(B("<b>By cause:</b> " + ", ".join(f"{c} {n}" for c, n in causes.most_common())
+                   + f". ({len([k for k in RESUMED_AFTER_CRASH if k in by_id])} of these "
+                   "were resumed afterwards.)"))
     story.append(Spacer(1, 6))
     story.append(B(
         "<b>Why retries don't help:</b> the client treats the day-limit message as "

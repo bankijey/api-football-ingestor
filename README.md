@@ -6,6 +6,21 @@
 
 ---
 
+## In production
+
+The ingestor has run on a daily schedule since June 2026. Every run is recorded in `ingestion_runs`, and every call it gave up on is recorded in `dead_letter`. The charts below are drawn straight from those tables:
+
+![Scheduled run outcome by day](docs/img/run-calendar.png)
+
+![Estimated API calls per day against the daily limit](docs/img/api-calls.png)
+
+Each failure has a recorded cause, and the run history is what found them:
+- **Whole-run failures** come from two sources. **Network failures** (DNS lookups failing on the host at 02:00) caused a week of failures in late June. **The API's daily quota** caused the failures from August on. The run was scheduled at 02:00 Berlin, which is 00:00 UTC in summer, exactly when the quota resets. Manual backfills that ran past midnight also used up the next day's quota. The schedule moved to 07:00, the limiter's `DAILY_QUOTA` now matches the plan, and large backfills are to be split into chunks that each fit one day's quota.
+- **Partial runs** come from per-minute rate limiting. Failure isolation limits the damage to a handful of dead-lettered leagues or fixtures, and the next run fetches those again.
+- **Days with no run** mean the host was down. Crashed runs can be resumed (`--resume`) and date gaps backfilled (`--from/--to`).
+
+The full analysis is in [`docs/ingestion-failure-report.pdf`](docs/ingestion-failure-report.pdf). It is generated from the live database by [`docs/_build_failure_report.py`](docs/_build_failure_report.py), which also redraws these charts.
+
 ## Why this design
 
 API-Football has ~1,500 leagues, a per-minute rate limit, and a daily quota. Naively pulling everything every day blows the quota; pulling nothing wastes the bronze layer's job (capture everything, transform later). The chosen strategy:
@@ -28,6 +43,27 @@ Two API calls per relevant fixture instead of five. Quota survives.
 | **HTTP 200 with non-empty `errors` field = failure** | API-Football's quirk — silently succeeded responses that aren't actually success. Handled explicitly. |
 
 ## Architecture
+
+```mermaid
+flowchart TD
+    cron["Scheduler container<br/>cron 07:00 Europe/Berlin"] -->|"docker compose run --build"| cli["ingestor CLI<br/>ingest · --resume · --from/--to"]
+    cli <-->|"run state, checkpoints, heartbeat"| runs[("ingestion_runs<br/>ingestion_checkpoints")]
+    cli --> leagues
+
+    subgraph fetch ["Every call: rate limiter → retries with backoff → 'errors' field check"]
+        leagues["GET /leagues<br/>once per run"] --> lsel{"League filter<br/>current season + coverage"}
+        lsel --> pa["Phase A · per league<br/>GET /fixtures?league&season"]
+        pa --> fsel{"Fixture filter<br/>lookback + played status"}
+        fsel --> pb["Phase B · per fixture<br/>GET /fixtures?id (rich)<br/>GET /fixtures/statistics (half-time)"]
+    end
+
+    pa & pb --> outcome{"Task outcome"}
+    outcome -->|"ok · SHA-256 hash dedup"| bronze[("Postgres bronze<br/>append-only JSONB")]
+    outcome -->|"failed after retries"| dl[("dead_letter")]
+    bronze -->|"only if the run succeeded"| proj[("apifootball_events<br/>matcher projection")]
+```
+
+Phase A and Phase B each run in a bounded `ThreadPoolExecutor`, and every league and fixture is failure-isolated. A task that fails lands in `dead_letter` without stopping the run.
 
 ```
 src/ingestor/
@@ -92,21 +128,6 @@ Pure tests (HTTP, config, logging, selection logic) run without Postgres and aut
 - **Ruff** for linting + import sorting
 - **All Phase 1 ROADMAP boxes ticked** (see `docs/ROADMAP.md`)
 
-## In production
-
-The ingestor has run on a daily schedule since June 2026. Every run is recorded in `ingestion_runs` and every call it gave up on in `dead_letter`, so its operating history can be plotted directly from the database:
-
-![Scheduled run outcome by day](docs/img/run-calendar.png)
-
-![Estimated API calls per day against the daily limit](docs/img/api-calls.png)
-
-The failures have clear causes, and the run history is what found them:
-- **Whole-run failures** come from the API's daily quota. The run was scheduled at 02:00 Berlin, which is 00:00 UTC in summer, exactly when the quota resets. Manual backfills that ran past midnight also used up the next day's quota. The schedule moved to 07:00, the limiter's `DAILY_QUOTA` now matches the plan, and large backfills are to be split into chunks that each fit one day's quota.
-- **Partial runs** come from per-minute rate limiting. Failure isolation contains them to a handful of dead-lettered leagues or fixtures, and the next run fetches those again.
-- **Days with no run** mean the host was down; runs can be resumed and date gaps backfilled (`--resume`, `--from/--to`).
-
-The full analysis is in [`docs/ingestion-failure-report.pdf`](docs/ingestion-failure-report.pdf). It is generated from the live database by [`docs/_build_failure_report.py`](docs/_build_failure_report.py), which also redraws these charts.
-
 ## Tech stack
 
 Python 3.12 · `httpx` (sync) · `tenacity` (retries + jitter) · `pydantic` + `pydantic-settings` · `structlog` · `psycopg2` · `concurrent.futures.ThreadPoolExecutor` · Docker / Compose · Make
@@ -131,4 +152,4 @@ Next phases (designed, not started):
 
 ## License
 
-Private — part of the Arbibet platform.
+[MIT](LICENSE) © 2026 Banki

@@ -396,14 +396,21 @@ def build():
         col_widths=[95 * mm, 75 * mm]))
     story.append(Spacer(1, 6))
     story.append(Paragraph(
-        "<b>Before recreating the scheduler, save its log.</b> The root cause of a crashed "
-        "run (e.g. the daily-limit message) is only in <font face='Courier'>/var/log/ingest.log</font> "
-        "inside the scheduler container. <font face='Courier'>--force-recreate</font> wipes it.",
+        "<b>Why did a run crash?</b> A crashed run stores its exception in "
+        "<font face='Courier'>ingestion_runs.counters</font>. Resuming the run to success "
+        "overwrites it, so check before resuming:",
         styles["Body"]))
     story.append(_code(styles,
-        "docker cp ingestor-scheduler:/var/log/ingest.log ingest-backup.log"))
-    story.append(Paragraph("<b>Why did a run crash?</b>", styles["Body"]))
+        "SELECT run_id, started_at, counters->>'error' AS error\n"
+        "FROM ingestion_runs\n"
+        "WHERE status = 'failed'\n"
+        "ORDER BY started_at DESC\n"
+        "LIMIT 5;"))
+    story.append(Paragraph(
+        "The full traceback is in the scheduler log. <font face='Courier'>--force-recreate</font> "
+        "wipes that log, so save it first:", styles["Body"]))
     story.append(_code(styles,
+        "docker cp ingestor-scheduler:/var/log/ingest.log ingest-backup.log\n"
         "docker exec ingestor-scheduler sh -c \"grep run.crashed /var/log/ingest.log | tail -n 3\""))
     story.append(Paragraph("<b>Plan, expiry and today's usage (uses no quota)</b>", styles["Body"]))
     story.append(_code(styles,
